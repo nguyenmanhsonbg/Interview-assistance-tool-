@@ -10,6 +10,30 @@ from app.repositories.base import RepositoryBase
 
 
 class AITaskRepository(RepositoryBase):
+    def pending_ids(self) -> list[str]:
+        return [
+            row["id"]
+            for row in self.query_all(
+                """SELECT id FROM ai_tasks WHERE status IN ('PENDING','PENDING_RETRY')
+                   ORDER BY created_at, id"""
+            )
+        ]
+
+    def recoverable_materialization_ids(self) -> list[str]:
+        return [
+            row["id"]
+            for row in self.query_all(
+                """SELECT t.id FROM ai_tasks t
+                   JOIN interview_cases ic ON ic.id=t.interview_case_id
+                   WHERE t.status='COMPLETED' AND t.error_code IS NULL AND (
+                     (t.task_type='GENERATE_QUESTIONS' AND ic.status='QUESTIONS_GENERATING')
+                     OR
+                     (t.task_type IN ('EVALUATE_ASSESSMENT','GENERATE_BRIEF')
+                      AND ic.status='AI_ANALYZING')
+                   )
+                   ORDER BY t.created_at, t.id"""
+            )
+        ]
     def get(self, task_id: str) -> dict[str, Any]:
         row = self.query_one("SELECT * FROM ai_tasks WHERE id=?", (task_id,))
         if row is None:

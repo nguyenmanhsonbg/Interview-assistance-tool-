@@ -3,6 +3,7 @@ from tests.test_questions import valid_questions
 
 def create_approved_case(test_case):
     from app.services.case_service import CaseService
+    from app.services.document_service import DocumentService
     from app.services.question_service import QuestionService
 
     cases = CaseService(test_case.database)
@@ -12,10 +13,15 @@ def create_approved_case(test_case):
         candidate["id"], job["id"],
         committee_members=[{"displayName": "Lead", "role": "LEAD"}],
     )
+    data_root = getattr(
+        test_case, "data_root", test_case.database.path.resolve().parents[1]
+    )
+    documents = DocumentService(test_case.database, data_root)
+    jd = documents.import_manual_text(case["id"], "JD", "Senior engineer role")
+    cv = documents.import_manual_text(case["id"], "CV", "Backend engineering experience")
+    documents.confirm(jd["id"], jd["contentSha256"])
+    documents.confirm(cv["id"], cv["contentSha256"])
     with test_case.database.transaction() as connection:
-        connection.execute(
-            "UPDATE interview_cases SET status='DOCUMENTS_READY' WHERE id=?", (case["id"],)
-        )
         member_id = connection.execute(
             "SELECT id FROM interview_case_committee_members WHERE interview_case_id=?",
             (case["id"],),

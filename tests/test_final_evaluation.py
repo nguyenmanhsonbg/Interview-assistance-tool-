@@ -82,6 +82,17 @@ class FinalEvaluationTests(MigratedDatabaseFixture, unittest.TestCase):
             ).fetchone()
         self.assertEqual(("FINAL", "PASS", 0), tuple(old))
 
+    def test_updating_draft_returns_the_committed_values(self):
+        service = self.service()
+        draft = service.save_final_draft(self.case["id"], draft_payload())
+
+        updated = service.save_final_draft(
+            self.case["id"], draft_payload("NEXT_ROUND")
+        )
+
+        self.assertEqual(draft["id"], updated["id"])
+        self.assertEqual("NEXT_ROUND", updated["finalResult"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -69,7 +69,9 @@ class LiveInterviewTests(MigratedDatabaseFixture, unittest.TestCase):
         service.start(self.case["id"], self.member_id)
         service.record(
             self.case["id"], sequence_no=1, committee_member_id=self.member_id,
-            asked_status="ASKED", live_notes="Sensitive live note", score=2,
+            asked_status="ASKED",
+            live_notes="Sensitive live note candidate@example.com +84 912 345 678",
+            score=2,
             evidence_status="UNVERIFIED",
         )
         task = service.request_follow_up(self.case["id"], idempotency_key="follow-up-1")
@@ -77,7 +79,11 @@ class LiveInterviewTests(MigratedDatabaseFixture, unittest.TestCase):
         provider = Provider()
         completed = service.process_follow_up(task["id"], provider)
         self.assertEqual("COMPLETED", completed["status"])
-        self.assertEqual("Sensitive live note", provider.payload["liveRecords"][0]["liveNotes"])
+        note = provider.payload["liveRecords"][0]["liveNotes"]
+        self.assertIn("Sensitive live note", note)
+        self.assertIn("[REDACTED_EMAIL]", note)
+        self.assertIn("[REDACTED_PHONE]", note)
+        self.assertNotIn("committeeMemberId", provider.payload["liveRecords"][0])
 
 
 if __name__ == "__main__":

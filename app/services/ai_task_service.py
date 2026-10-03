@@ -70,6 +70,11 @@ class AITaskService:
             self.repository.mark_running(connection, task_id)
         try:
             payload = payload_override or task["inputManifest"].get("payload", task["inputManifest"])
+            if task["status"] == "PENDING_RETRY":
+                payload = dict(payload)
+                payload["repairInstruction"] = (
+                    "Return one corrected JSON object that strictly matches the requested schema."
+                )
             if task["taskType"] == "GENERATE_QUESTIONS":
                 output = provider.generate_questions(payload)
                 operation = result_type = "QUESTION_GENERATION"
@@ -86,7 +91,7 @@ class AITaskService:
             self._record_error(task, error.code, str(error), retryable=error.retryable)
             return self.repository.get(task_id)
         except ValidationError as error:
-            self._record_error(task, "AI_SCHEMA_VALIDATION_FAILED", str(error), retryable=False)
+            self._record_error(task, "AI_SCHEMA_VALIDATION_FAILED", str(error), retryable=True)
             return self.repository.get(task_id)
         except Exception:
             self._record_error(task, "AI_PROVIDER_UNEXPECTED_ERROR", "AI provider failed unexpectedly", retryable=False)
@@ -103,15 +108,59 @@ class AITaskService:
         pending_retry: list[str] = []
         failed: list[str] = []
         with self.database.transaction() as connection:
-            rows = connection.execute("SELECT id, retry_count, max_retry FROM ai_tasks WHERE status='RUNNING'").fetchall()
+            rows = connection.execute(
+                """SELECT id, interview_case_id, task_type, retry_count, max_retry
+                   FROM ai_tasks WHERE status='RUNNING'"""
+            ).fetchall()
             for row in rows:
                 if row["retry_count"] < row["max_retry"]:
                     connection.execute("UPDATE ai_tasks SET status='PENDING_RETRY', retry_count=retry_count+1, error_code='AI_TASK_INTERRUPTED', error_message='Recovered after restart' WHERE id=?", (row["id"],))
+                    append_audit(
+                        connection, actor_type="SYSTEM", action="AI_TASK_RETRIED",
+                        entity_type="AI_TASK", entity_id=row["id"],
+                        metadata={"errorCode": "AI_TASK_INTERRUPTED"},
+                    )
                     pending_retry.append(row["id"])
                 else:
                     connection.execute("UPDATE ai_tasks SET status='FAILED', error_code='AI_TASK_INTERRUPTED', error_message='Retry limit reached', finished_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?", (row["id"],))
+                    self._apply_terminal_failure(connection, row)
+                    append_audit(
+                        connection, actor_type="SYSTEM", action="AI_TASK_FAILED",
+                        entity_type="AI_TASK", entity_id=row["id"],
+                        metadata={"errorCode": "AI_TASK_INTERRUPTED", "retryable": False},
+                    )
                     failed.append(row["id"])
         return {"pendingRetry": pending_retry, "failed": failed}
+
+    def fail_materialization(self, task_id: str) -> dict[str, Any]:
+        task = self.repository.get(task_id)
+        if task["status"] != "COMPLETED":
+            self._record_error(
+                task,
+                "AI_PROCESSING_FAILED",
+                "AI task processing failed unexpectedly",
+                retryable=False,
+            )
+            return self.repository.get(task_id)
+        with self.database.transaction() as connection:
+            connection.execute(
+                """UPDATE ai_tasks SET error_code='AI_MATERIALIZATION_FAILED',
+                   error_message='Validated AI output could not be materialized' WHERE id=?""",
+                (task_id,),
+            )
+            self._apply_terminal_failure(
+                connection,
+                {
+                    "task_type": task["taskType"],
+                    "interview_case_id": task["interviewCaseId"],
+                },
+            )
+            append_audit(
+                connection, actor_type="SYSTEM", action="AI_TASK_FAILED",
+                entity_type="AI_TASK", entity_id=task_id,
+                metadata={"errorCode": "AI_MATERIALIZATION_FAILED", "retryable": False},
+            )
+        return self.repository.get(task_id)
 
     def _record_error(self, task: dict[str, Any], code: str, message: str, *, retryable: bool) -> None:
         with self.database.transaction() as connection:
@@ -119,18 +168,36 @@ class AITaskService:
             failed = connection.execute(
                 "SELECT status FROM ai_tasks WHERE id=?", (task["id"],)
             ).fetchone()["status"] == "FAILED"
-            if failed and task["taskType"] == "GENERATE_QUESTIONS":
-                connection.execute(
-                    """UPDATE interview_cases SET status='QUESTION_GENERATION_FAILED',
-                       updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
-                    (task["interviewCaseId"],),
+            if failed:
+                self._apply_terminal_failure(
+                    connection,
+                    {
+                        "task_type": task["taskType"],
+                        "interview_case_id": task["interviewCaseId"],
+                    },
                 )
-            if failed and task["taskType"] in {"EVALUATE_ASSESSMENT", "GENERATE_BRIEF"}:
-                connection.execute(
-                    """UPDATE interview_cases SET status='AI_ANALYSIS_FAILED',
-                       updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
-                    (task["interviewCaseId"],),
-                )
-            append_audit(connection, actor_type="SYSTEM", action="AI_TASK_FAILED",
-                entity_type="AI_TASK", entity_id=task["id"],
-                metadata={"errorCode": code, "retryable": retryable})
+            append_audit(
+                connection,
+                actor_type="SYSTEM",
+                action="AI_TASK_FAILED" if failed else "AI_TASK_RETRIED",
+                entity_type="AI_TASK",
+                entity_id=task["id"],
+                metadata={"errorCode": code, "retryable": retryable},
+            )
+
+    @staticmethod
+    def _apply_terminal_failure(connection, task: Any) -> None:
+        task_type = task["task_type"]
+        case_id = task["interview_case_id"]
+        if task_type == "GENERATE_QUESTIONS":
+            connection.execute(
+                """UPDATE interview_cases SET status='QUESTION_GENERATION_FAILED',
+                   updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
+                (case_id,),
+            )
+        elif task_type in {"EVALUATE_ASSESSMENT", "GENERATE_BRIEF"}:
+            connection.execute(
+                """UPDATE interview_cases SET status='AI_ANALYSIS_FAILED',
+                   updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
+                (case_id,),
+            )

@@ -6,6 +6,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from tests.support import MigratedDatabaseFixture
 
@@ -36,6 +37,40 @@ class SecurityUnitTests(MigratedDatabaseFixture, unittest.TestCase):
         now[0] += timedelta(seconds=61)
         with self.assertRaises(Unauthenticated):
             security.verify_committee_session(session)
+
+    def test_candidate_handoff_invalidates_authentication_already_in_flight(self):
+        from app.domain.errors import Unauthenticated
+        from app.security import LocalSecurity, hashlib
+
+        security = LocalSecurity(self.database, pbkdf2_iterations=10_000)
+        security.set_committee_pin("482916")
+        entered = threading.Event()
+        release = threading.Event()
+        real_pbkdf2 = hashlib.pbkdf2_hmac
+        result = {}
+
+        def delayed_pbkdf2(*args, **kwargs):
+            entered.set()
+            self.assertTrue(release.wait(2))
+            return real_pbkdf2(*args, **kwargs)
+
+        def authenticate():
+            try:
+                result["session"] = security.authenticate_pin("482916")
+            except Exception as error:  # captured for assertion in the test thread
+                result["error"] = error
+
+        with patch("app.security.hashlib.pbkdf2_hmac", side_effect=delayed_pbkdf2):
+            thread = threading.Thread(target=authenticate)
+            thread.start()
+            self.assertTrue(entered.wait(2))
+            security.lock_all_committee_sessions()
+            release.set()
+            thread.join(2)
+
+        self.assertFalse(thread.is_alive())
+        self.assertNotIn("session", result)
+        self.assertIsInstance(result.get("error"), Unauthenticated)
 
 
 class SecurityHTTPTests(unittest.TestCase):

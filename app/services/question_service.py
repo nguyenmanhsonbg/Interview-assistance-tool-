@@ -36,7 +36,11 @@ class QuestionService:
         )
 
     def materialize_generated(
-        self, case_id: str, payload: dict[str, Any]
+        self,
+        case_id: str,
+        payload: dict[str, Any],
+        *,
+        document_refs: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         validated = validate_question_generation(payload)
         questions = [
@@ -66,6 +70,7 @@ class QuestionService:
                 "confidence": validated["confidence"],
                 "limitations": validated.get("limitations", []),
             },
+            document_refs=document_refs,
         )
 
     def update_draft(
@@ -155,6 +160,7 @@ class QuestionService:
         expected_case_states: set[str],
         audit_action: str,
         question_policy: dict[str, Any] | None = None,
+        document_refs: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         if not isinstance(duration_seconds, int) or not 600 <= duration_seconds <= 900:
             raise ValidationError("durationSeconds must be between 600 and 900")
@@ -167,6 +173,9 @@ class QuestionService:
                 raise ResourceNotFound("Interview case not found")
             if case["status"] not in expected_case_states:
                 raise StateConflict("Case is not ready for question materialization")
+            source_documents = _document_snapshot(
+                connection, case_id, document_refs=document_refs
+            )
             previous = connection.execute(
                 """SELECT id, version_no FROM question_sets WHERE interview_case_id=?
                    ORDER BY version_no DESC LIMIT 1""",
@@ -187,7 +196,15 @@ class QuestionService:
                 (
                     question_set_id, case_id, version, status, duration_seconds,
                     json.dumps({"version": "rubric.v1"}),
-                    json.dumps(question_policy or {}), supersedes,
+                    json.dumps(
+                        {
+                            **(question_policy or {}),
+                            "sourceDocuments": source_documents,
+                        },
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                    supersedes,
                 ),
             )
             _insert_questions(connection, question_set_id, questions)
@@ -266,3 +283,38 @@ def _insert_questions(
                 int(question["isRequired"]), question["estimatedSeconds"],
             ),
         )
+
+
+def _document_snapshot(
+    connection: sqlite3.Connection,
+    case_id: str,
+    *,
+    document_refs: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    if document_refs is None:
+        rows = connection.execute(
+            """SELECT id, document_type, version_no, content_sha256
+               FROM documents WHERE interview_case_id=? AND is_current=1
+                 AND is_ai_eligible=1 ORDER BY document_type""",
+            (case_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    normalized = []
+    for reference in document_refs:
+        if not isinstance(reference, dict):
+            raise StateConflict("Question-generation document snapshot is invalid")
+        row = connection.execute(
+            """SELECT id, document_type, version_no, content_sha256
+               FROM documents WHERE id=? AND interview_case_id=? AND is_ai_eligible=1""",
+            (reference.get("id"), case_id),
+        ).fetchone()
+        if (
+            row is None
+            or row["document_type"] != reference.get("document_type")
+            or row["version_no"] != reference.get("version_no")
+            or row["content_sha256"] != reference.get("content_sha256")
+        ):
+            raise StateConflict("Question-generation document snapshot no longer matches")
+        normalized.append(dict(row))
+    return sorted(normalized, key=lambda item: item["document_type"])

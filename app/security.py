@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import secrets
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Mapping
@@ -46,6 +47,8 @@ class LocalSecurity:
         self.startup_token = secrets.token_urlsafe(32)
         self._sessions: dict[str, datetime] = {}
         self._failed_pin_attempts = 0
+        self._session_epoch = 0
+        self._session_lock = threading.RLock()
 
     def set_committee_pin(self, pin: str) -> None:
         if not isinstance(pin, str) or not pin.isdigit() or not 4 <= len(pin) <= 12:
@@ -75,35 +78,60 @@ class LocalSecurity:
                     updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')""",
                 (protected,),
             )
-        self._sessions.clear()
+        with self._session_lock:
+            self._session_epoch += 1
+            self._sessions.clear()
+            self._failed_pin_attempts = 0
 
     def authenticate_pin(self, pin: str) -> str:
+        with self._session_lock:
+            authentication_epoch = self._session_epoch
         record = self._pin_record()
         salt = bytes.fromhex(record["salt"])
         actual = hashlib.pbkdf2_hmac(
             "sha256", str(pin).encode("utf-8"), salt, int(record["iterations"])
         )
         if not hmac.compare_digest(actual, bytes.fromhex(record["digest"])):
-            self._failed_pin_attempts += 1
-            self.sleep(min(0.1 * (2 ** (self._failed_pin_attempts - 1)), 2.0))
+            with self._session_lock:
+                self._failed_pin_attempts += 1
+                delay = min(0.1 * (2 ** (self._failed_pin_attempts - 1)), 2.0)
+            self.sleep(delay)
             raise Unauthenticated("Committee PIN is invalid")
-        self._failed_pin_attempts = 0
-        session = secrets.token_urlsafe(32)
-        self._sessions[hash_token(session)] = self.clock()
+        with self._session_lock:
+            if authentication_epoch != self._session_epoch:
+                raise Unauthenticated("Committee session was reset")
+            self._failed_pin_attempts = 0
+            session = secrets.token_urlsafe(32)
+            self._sessions[hash_token(session)] = self.clock()
         return session
 
     def verify_committee_session(self, session: str) -> None:
         key = hash_token(session) if session else ""
-        last_activity = self._sessions.get(key)
-        now = self.clock()
-        if last_activity is None or now - last_activity > timedelta(seconds=self.session_idle_seconds):
-            self._sessions.pop(key, None)
-            raise Unauthenticated("Committee session is invalid or expired")
-        self._sessions[key] = now
+        with self._session_lock:
+            last_activity = self._sessions.get(key)
+            now = self.clock()
+            if last_activity is None or now - last_activity > timedelta(seconds=self.session_idle_seconds):
+                self._sessions.pop(key, None)
+                raise Unauthenticated("Committee session is invalid or expired")
+            self._sessions[key] = now
 
     def lock(self, session: str) -> None:
         if session:
-            self._sessions.pop(hash_token(session), None)
+            with self._session_lock:
+                self._sessions.pop(hash_token(session), None)
+
+    def lock_all_committee_sessions(self) -> None:
+        with self._session_lock:
+            self._session_epoch += 1
+            self._sessions.clear()
+
+    def is_pin_configured(self) -> bool:
+        if self.database is None:
+            return False
+        with self.database.connection() as connection:
+            return connection.execute(
+                "SELECT 1 FROM app_settings WHERE key='committee_pin' AND is_sensitive=1"
+            ).fetchone() is not None
 
     def authorize(self, access_mode: str, method: str, headers: Mapping[str, str]) -> dict[str, Any]:
         context: dict[str, Any] = {}
@@ -114,6 +142,8 @@ class LocalSecurity:
             supplied = headers.get("X-Startup-Token", "")
             if not hmac.compare_digest(supplied, self.startup_token):
                 raise Unauthenticated("Startup capability is invalid")
+        if access_mode == "STARTUP":
+            return context
         if access_mode == "COMMITTEE":
             session = headers.get("X-Committee-Session", "")
             self.verify_committee_session(session)

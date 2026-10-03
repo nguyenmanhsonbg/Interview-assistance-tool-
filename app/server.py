@@ -5,6 +5,7 @@ import mimetypes
 import threading
 import uuid
 import webbrowser
+from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -57,8 +58,9 @@ def _health_handler(config: AppConfig):
             {
                 "status": "ok",
                 "version": config.app_version,
-                "database": "not-initialized",
-                "aiConfigured": False,
+                "database": "ready" if config.database_path.exists() else "not-initialized",
+                "aiConfigured": bool(config.ai_endpoint),
+                "serverTime": datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
             },
             request.request_id,
         )
@@ -79,7 +81,11 @@ def create_server(
         "GET",
         r"/api/v1/bootstrap",
         lambda request: success_response(
-            {"startupToken": local_security.startup_token}, request.request_id
+            {
+                "startupToken": local_security.startup_token,
+                "pinConfigured": local_security.is_pin_configured(),
+            },
+            request.request_id,
         ),
     )
     handler = _handler_factory(config, app_router, local_security)
@@ -296,9 +302,15 @@ def _domain_error_response(error: DomainError, request_id: str) -> Response:
     return error_response(error.code, str(error), request_id, status=status)
 
 
-def run(config: AppConfig, *, open_browser: bool = True) -> None:
+def run(
+    config: AppConfig,
+    *,
+    open_browser: bool = True,
+    router: Router | None = None,
+    security: LocalSecurity | None = None,
+) -> None:
     config.ensure_directories()
-    server = create_server(config)
+    server = create_server(config, router=router, security=security)
     url = f"http://{config.host}:{server.server_address[1]}"
     if open_browser:
         webbrowser.open(url)

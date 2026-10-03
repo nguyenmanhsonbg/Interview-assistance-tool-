@@ -13,6 +13,7 @@ from typing import Any
 
 from app.database import Database
 from app.domain.errors import BackupRequired, ResourceNotFound, ValidationError
+from app.infrastructure.case_locks import case_mutation_lock
 from app.infrastructure.file_storage import FileStorage
 from app.repositories.audit import append_audit
 
@@ -154,12 +155,40 @@ class BackupService:
                 metadata={"caseId": case_id, "includeDocuments": include_documents})
         return {"id": export_id, "status": "COMPLETED", "path": str(target)}
 
-    def delete_case(self, case_id: str, *, confirmation: str, backup_id: str | None) -> None:
+    def backup_and_delete_case(
+        self,
+        case_id: str,
+        *,
+        confirmation: str,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
         if confirmation != "DELETE_CASE":
             raise ValidationError("Explicit case deletion confirmation is required")
-        if not backup_id or self._backup_manifest(backup_id) is None:
+        with case_mutation_lock(case_id):
+            with self.database.mutation_barrier():
+                backup = self.create_backup("before-case-delete", include_documents=True)
+                self._delete_case_locked(
+                    case_id,
+                    confirmation=confirmation,
+                    backup_id=backup["id"],
+                    reason=reason,
+                )
+        return backup
+
+    def _delete_case_locked(
+        self,
+        case_id: str,
+        *,
+        confirmation: str,
+        backup_id: str | None,
+        reason: str | None = None,
+    ) -> None:
+        if confirmation != "DELETE_CASE":
+            raise ValidationError("Explicit case deletion confirmation is required")
+        manifest = self._backup_manifest(backup_id) if backup_id else None
+        if manifest is None:
             raise BackupRequired("A completed backup is required before deletion")
-        with self.database.transaction() as connection:
+        with self.database.connection() as connection:
             case = connection.execute("SELECT 1 FROM interview_cases WHERE id=?", (case_id,)).fetchone()
             if case is None:
                 raise ResourceNotFound("Interview case not found")
@@ -169,17 +198,67 @@ class BackupService:
                     (case_id,),
                 )
             ]
+        if paths and not manifest.get("includeDocuments"):
+            raise BackupRequired("A backup including documents is required before deletion")
+        request_metadata = {"backupId": backup_id}
+        if isinstance(reason, str) and reason.strip():
+            request_metadata["reason"] = reason.strip()
+        with self.database.transaction() as connection:
             append_audit(connection, actor_type="COMMITTEE", action="CASE_DELETE_REQUESTED",
                 entity_type="INTERVIEW_CASE", entity_id=case_id,
-                metadata={"backupId": backup_id})
-            connection.execute("DELETE FROM interview_cases WHERE id=?", (case_id,))
+                metadata=request_metadata)
+        staging = (
+            self.data_root / "deletion-staging" / case_id / str(uuid.uuid4())
+        ).resolve()
+        self._require_inside(staging, self.data_root / "deletion-staging")
+        moved: list[tuple[Path, Path]] = []
+        try:
+            for relative in paths:
+                source = self.storage.resolve_relative(relative)
+                if not source.is_file():
+                    continue
+                quarantined = (staging / relative).resolve()
+                self._require_inside(quarantined, staging)
+                quarantined.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(source, quarantined)
+                moved.append((source, quarantined))
+            with self.database.transaction() as connection:
+                connection.execute("DELETE FROM interview_cases WHERE id=?", (case_id,))
+        except Exception as error:
+            for source, quarantined in reversed(moved):
+                try:
+                    source.parent.mkdir(parents=True, exist_ok=True)
+                    if quarantined.is_file() and not source.exists():
+                        os.replace(quarantined, source)
+                except OSError:
+                    pass
+            with self.database.transaction() as connection:
+                append_audit(connection, actor_type="SYSTEM", action="CASE_DELETE_FAILED",
+                    entity_type="INTERVIEW_CASE", entity_id=case_id,
+                    metadata={"backupId": backup_id, "errorCode": type(error).__name__})
+            raise
+        try:
+            for _, quarantined in moved:
+                if quarantined.is_file():
+                    quarantined.unlink()
+        except Exception as error:
+            with self.database.transaction() as connection:
+                append_audit(connection, actor_type="SYSTEM", action="CASE_DELETE_FAILED",
+                    entity_type="INTERVIEW_CASE", entity_id=case_id,
+                    metadata={"backupId": backup_id, "errorCode": type(error).__name__,
+                              "orphanFileCount": sum(path.is_file() for _, path in moved)})
+            raise
+        with self.database.transaction() as connection:
             append_audit(connection, actor_type="COMMITTEE", action="CASE_DELETE_COMPLETED",
                 entity_type="INTERVIEW_CASE", entity_id=case_id,
-                metadata={"backupId": backup_id, "fileCount": len(paths)})
-        for relative in paths:
-            target = self.storage.resolve_relative(relative)
-            if target.is_file():
-                target.unlink()
+                metadata={"backupId": backup_id, "fileCount": len(moved)})
+        for directory in sorted(
+            {path.parent for _, path in moved}, key=lambda path: len(path.parts), reverse=True
+        ):
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
 
     def _backup_manifest(self, backup_id: str) -> dict[str, Any] | None:
         if not self.backup_root.exists():

@@ -77,6 +77,8 @@ class DocumentServiceTests(MigratedDatabaseFixture, unittest.TestCase):
             )
 
     def test_manual_replacement_creates_new_version_without_overwrite(self):
+        from app.domain.errors import StateConflict
+
         service = self.service()
         first = service.import_manual_text(self.case["id"], "JD", "First text")
         second = service.import_manual_text(self.case["id"], "JD", "Second text")
@@ -87,6 +89,59 @@ class DocumentServiceTests(MigratedDatabaseFixture, unittest.TestCase):
         old = next(item for item in versions if item["id"] == first["id"])
         self.assertFalse(old["isCurrent"])
         self.assertEqual("First text", old["extractedText"])
+        with self.assertRaises(StateConflict):
+            service.confirm(first["id"], first["contentSha256"])
+
+    def test_document_replacement_is_allowed_before_attempt_starts_and_locked_after(self):
+        from app.domain.errors import StateConflict
+        from app.services.assessment_service import AssessmentService
+        from app.services.question_service import QuestionService
+        from tests.test_questions import valid_questions
+
+        service = self.service()
+        jd = service.import_manual_text(self.case["id"], "JD", "Role")
+        cv = service.import_manual_text(self.case["id"], "CV", "Experience")
+        service.confirm(jd["id"], jd["contentSha256"])
+        service.confirm(cv["id"], cv["contentSha256"])
+        with self.database.transaction() as connection:
+            connection.execute(
+                "UPDATE interview_cases SET status='QUESTIONS_GENERATING' WHERE id=?",
+                (self.case["id"],),
+            )
+        replacement = service.import_manual_text(self.case["id"], "CV", "Replacement")
+        service.confirm(replacement["id"], replacement["contentSha256"])
+        with self.database.transaction() as connection:
+            connection.execute(
+                "UPDATE interview_cases SET status='DOCUMENTS_READY' WHERE id=?",
+                (self.case["id"],),
+            )
+        question_set = QuestionService(self.database).create_manual_draft(
+            self.case["id"], valid_questions(5)
+        )
+        with self.database.transaction() as connection:
+            member_id = connection.execute(
+                "SELECT id FROM interview_case_committee_members WHERE interview_case_id=?",
+                (self.case["id"],),
+            ).fetchone()
+            if member_id is None:
+                connection.execute(
+                    """INSERT INTO interview_case_committee_members(
+                        id, interview_case_id, display_name, role
+                    ) VALUES ('lead', ?, 'Lead', 'LEAD')""",
+                    (self.case["id"],),
+                )
+                member_id = ("lead",)
+        questions = QuestionService(self.database)
+        questions.approve(question_set["id"], member_id[0])
+        assessment = AssessmentService(self.database)
+        assessment.prepare(self.case["id"], question_set["id"])
+        assessment.start(
+            self.case["id"], candidate_code_confirmed=True,
+            committee_authorized=True,
+        )
+
+        with self.assertRaises(StateConflict):
+            service.import_manual_text(self.case["id"], "CV", "Too late")
 
 
 if __name__ == "__main__":

@@ -37,7 +37,7 @@ class AnswerAutosaveTests(MigratedDatabaseFixture, unittest.TestCase):
             )
 
     def test_blank_answer_is_explicit_and_submitted_answer_is_locked(self):
-        from app.domain.errors import StateConflict
+        from app.domain.errors import Unauthenticated
 
         self.service.save_answer(
             self.attempt["id"], self.question_id, self.token,
@@ -45,7 +45,7 @@ class AnswerAutosaveTests(MigratedDatabaseFixture, unittest.TestCase):
         )
         submitted = self.service.submit(self.attempt["id"], self.token, reason="MANUAL")
         self.assertEqual("ASSESSMENT_SUBMITTED", submitted["status"])
-        with self.assertRaises(StateConflict):
+        with self.assertRaises(Unauthenticated):
             self.service.save_answer(
                 self.attempt["id"], self.question_id, self.token,
                 text="late", is_answered=True, client_revision=2,

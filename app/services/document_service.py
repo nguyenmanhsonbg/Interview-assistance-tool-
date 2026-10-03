@@ -11,7 +11,8 @@ from typing import Any
 from xml.etree import ElementTree
 
 from app.database import Database
-from app.domain.errors import ResourceNotFound, UnsupportedMediaType, ValidationError
+from app.domain.errors import ResourceNotFound, StateConflict, UnsupportedMediaType, ValidationError
+from app.infrastructure.case_locks import case_mutation_lock
 from app.infrastructure.file_storage import FileStorage
 from app.repositories.audit import append_audit
 from app.repositories.documents import DocumentRepository
@@ -32,18 +33,19 @@ class DocumentService:
         self, case_id: str, document_type: str, text: str
     ) -> dict[str, Any]:
         canonical = _canonicalize(text)
-        return self._persist(
-            case_id=case_id,
-            document_type=document_type,
-            source_kind="MANUAL_TEXT",
-            extraction_status="MANUAL_CONFIRMED",
-            original_filename=None,
-            mime_type=None,
-            raw=None,
-            storage_path=None,
-            extracted_text=canonical,
-            ai_eligible=False,
-        )
+        with case_mutation_lock(case_id):
+            return self._persist(
+                case_id=case_id,
+                document_type=document_type,
+                source_kind="MANUAL_TEXT",
+                extraction_status="MANUAL_CONFIRMED",
+                original_filename=None,
+                mime_type=None,
+                raw=None,
+                storage_path=None,
+                extracted_text=canonical,
+                ai_eligible=False,
+            )
 
     def import_file(
         self,
@@ -53,7 +55,21 @@ class DocumentService:
         mime_type: str,
         raw: bytes,
     ) -> dict[str, Any]:
+        with case_mutation_lock(case_id):
+            return self._import_file_locked(
+                case_id, document_type, original_filename, mime_type, raw
+            )
+
+    def _import_file_locked(
+        self,
+        case_id: str,
+        document_type: str,
+        original_filename: str,
+        mime_type: str,
+        raw: bytes,
+    ) -> dict[str, Any]:
         _validate_document_type(document_type)
+        self._require_mutable_case(case_id)
         if not isinstance(raw, bytes) or len(raw) > MAX_FILE_BYTES:
             raise ValidationError("File exceeds the decoded size limit")
         extension = Path(original_filename).suffix.lower()
@@ -77,19 +93,25 @@ class DocumentService:
         ):
             extracted = ""
             status = "FAILED"
-        result = self._persist(
-            case_id=case_id,
-            document_type=document_type,
-            source_kind="IMPORTED_FILE",
-            extraction_status=status,
-            original_filename=Path(original_filename).name,
-            mime_type=mime_type,
-            raw=raw,
-            storage_path=relative,
-            extracted_text=extracted,
-            ai_eligible=False,
-            document_id=document_id,
-        )
+        try:
+            result = self._persist(
+                case_id=case_id,
+                document_type=document_type,
+                source_kind="IMPORTED_FILE",
+                extraction_status=status,
+                original_filename=Path(original_filename).name,
+                mime_type=mime_type,
+                raw=raw,
+                storage_path=relative,
+                extracted_text=extracted,
+                ai_eligible=False,
+                document_id=document_id,
+            )
+        except Exception:
+            stored = self.storage.resolve_relative(relative)
+            if stored.is_file():
+                stored.unlink()
+            raise
         if status == "FAILED":
             with self.database.transaction() as connection:
                 connection.execute(
@@ -109,12 +131,30 @@ class DocumentService:
         return result
 
     def confirm(self, document_id: str, expected_hash: str) -> dict[str, Any]:
+        with self.database.connection() as connection:
+            existing = connection.execute(
+                "SELECT interview_case_id FROM documents WHERE id=?", (document_id,)
+            ).fetchone()
+        if existing is None:
+            raise ResourceNotFound("Document not found")
+        with case_mutation_lock(existing["interview_case_id"]):
+            return self._confirm_locked(document_id, expected_hash)
+
+    def _confirm_locked(self, document_id: str, expected_hash: str) -> dict[str, Any]:
         with self.database.transaction() as connection:
             row = connection.execute(
-                "SELECT * FROM documents WHERE id=?", (document_id,)
+                """SELECT d.*, ic.status case_status, aa.status attempt_status
+                   FROM documents d
+                   JOIN interview_cases ic ON ic.id=d.interview_case_id
+                   LEFT JOIN assessment_attempts aa ON aa.interview_case_id=ic.id
+                   WHERE d.id=?""", (document_id,)
             ).fetchone()
             if row is None:
                 raise ResourceNotFound("Document not found")
+            if not row["is_current"]:
+                raise StateConflict("Only the current document version can be confirmed")
+            if not _documents_mutable(row["case_status"], row["attempt_status"]):
+                raise StateConflict("Documents are locked after the assessment starts")
             if row["content_sha256"] != expected_hash or not row["extracted_text"].strip():
                 raise ValidationError("Document text hash does not match or text is empty")
             connection.execute(
@@ -129,13 +169,15 @@ class DocumentService:
                      AND document_type IN ('JD','CV')""",
                 (row["interview_case_id"],),
             ).fetchone()[0]
-            case_status = "DOCUMENTS_READY" if count == 2 else "DRAFT"
-            if count == 2:
-                connection.execute(
-                    """UPDATE interview_cases SET status='DOCUMENTS_READY',
-                       updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
-                    (row["interview_case_id"],),
-                )
+            if row["case_status"] in {"DRAFT", "DOCUMENT_PARSE_FAILED", "DOCUMENTS_READY"}:
+                case_status = "DOCUMENTS_READY" if count == 2 else "DRAFT"
+            else:
+                case_status = row["case_status"]
+            connection.execute(
+                """UPDATE interview_cases SET status=?,
+                   updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
+                (case_status, row["interview_case_id"]),
+            )
             append_audit(
                 connection,
                 actor_type="COMMITTEE",
@@ -154,6 +196,20 @@ class DocumentService:
     def _peek_next_version(self, case_id: str, document_type: str) -> int:
         with self.database.connection() as connection:
             return self.repository.next_version(connection, case_id, document_type)[0]
+
+    def _require_mutable_case(self, case_id: str) -> None:
+        with self.database.connection() as connection:
+            row = connection.execute(
+                """SELECT ic.status, aa.status attempt_status
+                   FROM interview_cases ic
+                   LEFT JOIN assessment_attempts aa ON aa.interview_case_id=ic.id
+                   WHERE ic.id=?""",
+                (case_id,),
+            ).fetchone()
+        if row is None:
+            raise ResourceNotFound("Interview case not found")
+        if not _documents_mutable(row["status"], row["attempt_status"]):
+            raise StateConflict("Documents are locked after the assessment starts")
 
     def _persist(
         self,
@@ -175,17 +231,30 @@ class DocumentService:
         content_hash = hashlib.sha256(extracted_text.encode("utf-8")).hexdigest()
         file_hash = hashlib.sha256(raw).hexdigest() if raw is not None else None
         with self.database.transaction() as connection:
-            exists = connection.execute(
-                "SELECT 1 FROM interview_cases WHERE id=?", (case_id,)
+            case = connection.execute(
+                """SELECT ic.status, aa.status attempt_status
+                   FROM interview_cases ic
+                   LEFT JOIN assessment_attempts aa ON aa.interview_case_id=ic.id
+                   WHERE ic.id=?""",
+                (case_id,),
             ).fetchone()
-            if exists is None:
+            if case is None:
                 raise ResourceNotFound("Interview case not found")
+            if not _documents_mutable(case["status"], case["attempt_status"]):
+                raise StateConflict("Documents are locked after the assessment starts")
             version, supersedes = self.repository.next_version(
                 connection, case_id, document_type
             )
             connection.execute(
                 "UPDATE documents SET is_current=0 WHERE interview_case_id=? AND document_type=? AND is_current=1",
                 (case_id, document_type),
+            )
+            connection.execute(
+                """UPDATE interview_cases SET status=CASE
+                       WHEN status IN ('DRAFT','DOCUMENT_PARSE_FAILED','DOCUMENTS_READY')
+                       THEN 'DRAFT' ELSE status END,
+                   updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
+                (case_id,),
             )
             connection.execute(
                 """INSERT INTO documents(
@@ -210,6 +279,23 @@ class DocumentService:
                 metadata={"documentType": document_type, "versionNo": version},
             )
         return self.repository.get(document_id)
+
+
+def _documents_mutable(case_status: str, attempt_status: str | None) -> bool:
+    pre_assessment_states = {
+        "DRAFT",
+        "DOCUMENT_PARSE_FAILED",
+        "DOCUMENTS_READY",
+        "QUESTIONS_GENERATING",
+        "QUESTION_GENERATION_FAILED",
+        "QUESTIONS_GENERATED",
+        "QUESTIONS_APPROVED",
+        "READY_FOR_ASSESSMENT",
+    }
+    return (
+        case_status in pre_assessment_states
+        and attempt_status in {None, "READY_FOR_ASSESSMENT"}
+    )
 
 
 def _validate_document_type(document_type: str) -> None:

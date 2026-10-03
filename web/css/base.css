@@ -10,9 +10,23 @@
 body { margin: 0; min-height: 100vh; }
 button, input, textarea, select { font: inherit; }
 button { cursor: pointer; }
+button, input, textarea, select { border: 1px solid #9fb0bd; border-radius: .45rem; padding: .65rem .75rem; }
+button { background: #eef3f6; color: #12324a; font-weight: 650; }
+button.primary { background: #1269a5; border-color: #1269a5; color: white; }
+button.danger { background: #9d1c1c; border-color: #9d1c1c; color: white; }
+textarea { width: 100%; resize: vertical; min-height: 8rem; }
+label { display: grid; gap: .35rem; font-weight: 650; }
 :focus-visible { outline: 3px solid #0b6bcb; outline-offset: 2px; }
 .skip-link { position: absolute; left: -9999px; }
 .skip-link:focus { left: 1rem; top: 1rem; background: white; padding: .5rem; z-index: 10; }
 .card { background: white; border: 1px solid #d7e0e7; border-radius: .75rem; padding: 1.25rem; }
+.stack { display: grid; gap: 1rem; }
+.actions { display: flex; flex-wrap: wrap; gap: .75rem; }
+.actions a { padding: .65rem .85rem; border: 1px solid #b9c7d1; border-radius: .45rem; }
+.list-row { display: flex; justify-content: space-between; gap: 1rem; padding: .8rem 0; border-bottom: 1px solid #e4eaee; }
+.badge { display: inline-block; width: fit-content; padding: .2rem .55rem; border-radius: 999px; background: #e5f0f7; color: #174f78; font-size: .85rem; }
+.notice { padding: .7rem; border-left: 4px solid #0b6bcb; background: #eef7ff; }
+.question-card { display: grid; gap: .75rem; padding: 1rem; border: 1px solid #d7e0e7; border-radius: .6rem; background: #fff; }
+.candidate-workspace { max-width: 850px; margin-inline: auto; }
 .muted { color: #52616f; }
 .error { color: #9d1c1c; }

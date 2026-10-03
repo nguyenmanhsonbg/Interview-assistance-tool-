@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from app.ai.provider import AIProvider
+from app.ai.redaction import sanitize_text
 from app.ai.schemas import SchemaRegistry
 from app.database import Database
 from app.domain.errors import ForbiddenCapability, ResourceNotFound, StateConflict, ValidationError
@@ -65,12 +66,13 @@ class EvaluationService:
 
     def process(self, task_id: str, provider: AIProvider) -> dict[str, Any]:
         task = self.tasks.repository.get(task_id)
-        payload = self.provider_payload(
-            task["interviewCaseId"], task["assessmentAttemptId"]
-        )
+        payload = self.provider_payload(task)
         return self.tasks.process(task_id, provider, payload_override=payload)
 
-    def provider_payload(self, case_id: str, attempt_id: str) -> dict[str, Any]:
+    def provider_payload(self, task: dict[str, Any]) -> dict[str, Any]:
+        case_id = task["interviewCaseId"]
+        attempt_id = task["assessmentAttemptId"]
+        manifest = task["inputManifest"]
         with self.database.connection() as connection:
             header = connection.execute(
                 """SELECT c.candidate_code, c.full_name, j.position_title, j.target_level,
@@ -84,26 +86,59 @@ class EvaluationService:
             ).fetchone()
             if header is None:
                 raise ResourceNotFound("Assessment snapshot not found")
-            documents = connection.execute(
-                """SELECT document_type, id, version_no, extracted_text, content_sha256
-                   FROM documents WHERE interview_case_id=? AND is_current=1
-                     AND is_ai_eligible=1 ORDER BY document_type""",
-                (case_id,),
-            ).fetchall()
+            documents = []
+            for reference in manifest.get("documents", []):
+                row = connection.execute(
+                    """SELECT document_type, id, version_no, extracted_text, content_sha256
+                       FROM documents WHERE id=? AND interview_case_id=? AND is_ai_eligible=1""",
+                    (reference.get("id"), case_id),
+                ).fetchone()
+                if (
+                    row is None
+                    or row["document_type"] != reference.get("document_type")
+                    or row["version_no"] != reference.get("version_no")
+                    or row["content_sha256"] != reference.get("content_sha256")
+                ):
+                    raise StateConflict("Evaluation document snapshot no longer matches")
+                documents.append(row)
+        answers = self.answer_snapshot(attempt_id)
+        answer_refs = {reference["id"]: reference for reference in manifest.get("answers", [])}
+        if set(answer_refs) != {answer["answerId"] for answer in answers}:
+            raise StateConflict("Evaluation answer snapshot no longer matches")
+        for answer in answers:
+            reference = answer_refs[answer["answerId"]]
+            content_hash = hashlib.sha256(answer["answerText"].encode("utf-8")).hexdigest()
+            if (
+                reference.get("question_id") != answer["questionId"]
+                or reference.get("save_revision") != answer["saveRevision"]
+                or reference.get("content_hash") != content_hash
+            ):
+                raise StateConflict("Evaluation answer snapshot no longer matches")
         return {
             "schemaVersion": "ai.input.v1",
             "operation": "EVALUATE_ASSESSMENT",
-            "candidate": {"candidateCode": header["candidate_code"], "fullName": header["full_name"]},
+            "candidate": {"candidateCode": header["candidate_code"]},
             "job": {"positionTitle": header["position_title"], "targetLevel": header["target_level"]},
             "documents": [
                 {"documentType": row["document_type"], "documentId": row["id"],
-                 "versionNo": row["version_no"], "sanitizedText": row["extracted_text"],
+                  "versionNo": row["version_no"],
+                  "sanitizedText": sanitize_text(
+                      row["extracted_text"], known_names=(header["full_name"],)
+                  ),
                  "contentSha256": row["content_sha256"]}
                 for row in documents
             ],
             "questionSetId": header["question_set_id"],
             "assessmentAttemptId": attempt_id,
-            "answers": self.answer_snapshot(attempt_id),
+            "answers": [
+                {
+                    **answer,
+                    "answerText": sanitize_text(
+                        answer["answerText"], known_names=(header["full_name"],)
+                    ),
+                }
+                for answer in answers
+            ],
         }
 
     def answer_snapshot(self, attempt_id: str) -> list[dict[str, Any]]:
@@ -172,7 +207,7 @@ class EvaluationService:
                     entity_type="EVALUATION", entity_id=current["id"],
                     metadata={"versionNo": current["version_no"], "updated": True},
                 )
-                return self.repository.get_evaluation(current["id"])
+                evaluation_id = current["id"]
             else:
                 if not isinstance(revision_reason, str) or not revision_reason.strip():
                     raise ValidationError("revisionReason is required to revise a final evaluation")
@@ -182,25 +217,26 @@ class EvaluationService:
                 connection.execute(
                     "UPDATE evaluations SET is_current=0 WHERE id=?", (current["id"],)
                 )
-            connection.execute(
-                """INSERT INTO evaluations(
-                    id, interview_case_id, version_no, status, final_result,
-                    final_level, summary, strengths_json, gaps_json, risks_json,
-                    final_comment, supersedes_evaluation_id, is_current
-                ) VALUES (?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
-                (evaluation_id, case_id, version, *values, supersedes),
-            )
-            connection.execute(
-                "UPDATE interview_cases SET status='EVALUATION_PENDING', updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?",
-                (case_id,),
-            )
-            metadata = {"versionNo": version}
-            if revision_reason:
-                metadata["reason"] = revision_reason.strip()
-            append_audit(
-                connection, actor_type="COMMITTEE", action=action,
-                entity_type="EVALUATION", entity_id=evaluation_id, metadata=metadata,
-            )
+            if current is None or current["status"] != "DRAFT":
+                connection.execute(
+                    """INSERT INTO evaluations(
+                        id, interview_case_id, version_no, status, final_result,
+                        final_level, summary, strengths_json, gaps_json, risks_json,
+                        final_comment, supersedes_evaluation_id, is_current
+                    ) VALUES (?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+                    (evaluation_id, case_id, version, *values, supersedes),
+                )
+                connection.execute(
+                    "UPDATE interview_cases SET status='EVALUATION_PENDING', updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?",
+                    (case_id,),
+                )
+                metadata = {"versionNo": version}
+                if revision_reason:
+                    metadata["reason"] = revision_reason.strip()
+                append_audit(
+                    connection, actor_type="COMMITTEE", action=action,
+                    entity_type="EVALUATION", entity_id=evaluation_id, metadata=metadata,
+                )
         return self.repository.get_evaluation(evaluation_id)
 
     def finalize(self, evaluation_id: str, member_id: str, *, confirmation: str) -> dict[str, Any]:
@@ -251,18 +287,23 @@ class EvaluationService:
     def _manifest(self, case_id: str, attempt_id: str) -> dict[str, Any]:
         with self.database.connection() as connection:
             attempt = connection.execute(
-                "SELECT * FROM assessment_attempts WHERE id=? AND interview_case_id=?",
+                """SELECT aa.*, qs.question_policy_json
+                   FROM assessment_attempts aa
+                   JOIN question_sets qs ON qs.id=aa.question_set_id
+                   WHERE aa.id=? AND aa.interview_case_id=?""",
                 (attempt_id, case_id),
             ).fetchone()
             if attempt is None:
                 raise ResourceNotFound("Assessment attempt not found")
             if attempt["status"] not in {"ASSESSMENT_SUBMITTED", "ASSESSMENT_EXPIRED"}:
                 raise StateConflict("Assessment must be submitted or expired")
-            documents = connection.execute(
-                """SELECT id, document_type, version_no, content_sha256
-                   FROM documents WHERE interview_case_id=? AND is_current=1
-                     AND is_ai_eligible=1 ORDER BY document_type""", (case_id,)
-            ).fetchall()
+            try:
+                question_policy = json.loads(attempt["question_policy_json"])
+            except (TypeError, json.JSONDecodeError) as error:
+                raise StateConflict("Question Set provenance is invalid") from error
+            documents = question_policy.get("sourceDocuments", [])
+            if not isinstance(documents, list):
+                raise StateConflict("Question Set provenance is invalid")
             answers = connection.execute(
                 """SELECT id, question_id, is_answered, save_revision, answer_text
                    FROM answers WHERE assessment_attempt_id=? ORDER BY question_id""",
@@ -281,7 +322,7 @@ class EvaluationService:
         return {
             "schemaVersion": "ai-task-manifest.v1", "interviewCaseId": case_id,
             "assessmentAttemptId": attempt_id, "questionSetId": attempt["question_set_id"],
-            "documents": [dict(row) for row in documents],
+            "documents": documents,
             "answers": answer_references,
             "redactionPolicy": "SANITIZED_TEXT_ONLY",
         }

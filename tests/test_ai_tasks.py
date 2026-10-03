@@ -1,4 +1,5 @@
 import hashlib
+import threading
 import unittest
 
 from tests.ai_fixtures import question_generation_payload
@@ -89,6 +90,83 @@ class AITaskTests(MigratedDatabaseFixture, unittest.TestCase):
             connection.execute("UPDATE ai_tasks SET status='RUNNING' WHERE id=?", (running["id"],))
         recovered = service.recover_interrupted()
         self.assertEqual([running["id"]], recovered["pendingRetry"])
+
+    def test_schema_failure_gets_one_repair_retry_then_terminal_fallback(self):
+        from app.ai.schemas import SchemaRegistry
+        from app.services.ai_task_service import AITaskService
+        from pathlib import Path
+
+        class InvalidProvider:
+            def __init__(self):
+                self.payloads = []
+
+            def generate_questions(self, payload):
+                self.payloads.append(payload)
+                return {"schemaVersion": "wrong"}
+
+        service = AITaskService(
+            self.database,
+            SchemaRegistry(Path(__file__).resolve().parents[1] / "schemas"),
+        )
+        task = self.enqueue(service, "schema-retry")
+        provider = InvalidProvider()
+        retry = service.process(task["id"], provider)
+        failed = service.process(task["id"], provider)
+
+        self.assertEqual("PENDING_RETRY", retry["status"])
+        self.assertEqual("FAILED", failed["status"])
+        self.assertNotIn("repairInstruction", provider.payloads[0])
+        self.assertIn("repairInstruction", provider.payloads[1])
+        with self.database.connection() as connection:
+            status = connection.execute(
+                "SELECT status FROM interview_cases WHERE id=?", (self.case["id"],)
+            ).fetchone()[0]
+        self.assertEqual("QUESTION_GENERATION_FAILED", status)
+
+    def test_worker_continues_with_next_task_after_unexpected_processor_error(self):
+        from app.ai.task_worker import AITaskWorker
+
+        completed = threading.Event()
+
+        class Processor:
+            def process(self, task_id, provider):
+                if task_id == "broken":
+                    raise RuntimeError("simulated materialization failure")
+                completed.set()
+
+        worker = AITaskWorker(Processor(), FakeProvider())
+        worker.start()
+        try:
+            worker.submit("broken")
+            worker.submit("next")
+            self.assertTrue(completed.wait(1), "worker stopped after the first task failed")
+        finally:
+            worker.stop()
+
+    def test_worker_requeues_one_persistent_retry(self):
+        from app.ai.task_worker import AITaskWorker
+
+        completed = threading.Event()
+
+        class Processor:
+            calls = 0
+
+            def process(self, task_id, provider):
+                self.calls += 1
+                if self.calls == 1:
+                    return {"status": "PENDING_RETRY", "retryCount": 1}
+                completed.set()
+                return {"status": "COMPLETED", "retryCount": 1}
+
+        processor = Processor()
+        worker = AITaskWorker(processor, FakeProvider(), sleep=lambda _: None)
+        worker.start()
+        try:
+            worker.submit("retry-me")
+            self.assertTrue(completed.wait(1), "persistent retry was not requeued")
+            self.assertEqual(2, processor.calls)
+        finally:
+            worker.stop()
 
 
 if __name__ == "__main__":

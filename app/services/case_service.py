@@ -4,7 +4,7 @@ import uuid
 from typing import Any
 
 from app.database import Database
-from app.domain.errors import ResourceNotFound
+from app.domain.errors import ResourceNotFound, ValidationError
 from app.domain.rules import require_text, require_transition
 from app.repositories.audit import append_audit
 from app.repositories.candidates import CandidateRepository
@@ -61,9 +61,11 @@ class CaseService:
         committee_members: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         if assessment_duration_seconds <= 0:
-            raise ValueError("assessmentDurationSeconds must be positive")
+            raise ValidationError("assessmentDurationSeconds must be positive")
         normalized_members: list[dict[str, str]] = []
         for member in committee_members or []:
+            if member.get("role", "MEMBER") not in {"MEMBER", "LEAD"}:
+                raise ValidationError("Committee member role must be MEMBER or LEAD")
             normalized_members.append(
                 {
                     "displayName": require_text(member.get("displayName"), "displayName"),

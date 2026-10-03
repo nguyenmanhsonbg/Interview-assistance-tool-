@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -22,6 +22,10 @@ class AppConfig:
     max_upload_body: int = 10 * 1024 * 1024
     max_ai_response: int = 5 * 1024 * 1024
     app_version: str = "0.1.0"
+    ai_endpoint: str | None = None
+    ai_model: str = "configured-model"
+    ai_api_key: str | None = field(default=None, repr=False)
+    ai_timeout_seconds: float = 30.0
 
     def __post_init__(self) -> None:
         if self.host != "127.0.0.1":
@@ -43,6 +47,13 @@ class AppConfig:
             max_upload_body=int(
                 os.environ.get("MAX_UPLOAD_BODY", str(10 * 1024 * 1024))
             ),
+            max_ai_response=int(
+                os.environ.get("MAX_AI_RESPONSE", str(5 * 1024 * 1024))
+            ),
+            ai_endpoint=os.environ.get("AI_ENDPOINT") or None,
+            ai_model=os.environ.get("AI_MODEL", "configured-model"),
+            ai_api_key=os.environ.get("AI_API_KEY") or None,
+            ai_timeout_seconds=float(os.environ.get("AI_TIMEOUT_SECONDS", "30")),
         )
 
     @property

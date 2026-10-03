@@ -11,6 +11,7 @@ from app.domain.errors import ResourceNotFound, StateConflict, ValidationError
 from app.repositories.audit import append_audit
 from app.repositories.evaluations import EvaluationRepository
 from app.ai.provider import AIProvider
+from app.ai.redaction import sanitize_structure, sanitize_text
 from app.ai.schemas import SchemaRegistry
 from app.services.ai_task_service import AITaskService
 
@@ -133,7 +134,8 @@ class InterviewService:
         records = self.list_records(case_id)
         with self.database.connection() as connection:
             case = connection.execute(
-                "SELECT status FROM interview_cases WHERE id=?", (case_id,)
+                """SELECT ic.status, c.full_name FROM interview_cases ic
+                   JOIN candidates c ON c.id=ic.candidate_id WHERE ic.id=?""", (case_id,)
             ).fetchone()
             brief = connection.execute(
                 "SELECT id FROM interview_briefs WHERE interview_case_id=? AND is_current=1",
@@ -173,20 +175,39 @@ class InterviewService:
             raise StateConflict("Task is not a follow-up request")
         with self.database.connection() as connection:
             brief_row = connection.execute(
-                "SELECT brief_json FROM interview_briefs WHERE id=?",
+                """SELECT ib.brief_json, c.full_name FROM interview_briefs ib
+                   JOIN interview_cases ic ON ic.id=ib.interview_case_id
+                   JOIN candidates c ON c.id=ic.candidate_id WHERE ib.id=?""",
                 (task["inputManifest"]["interviewBriefId"],),
             ).fetchone()
         if brief_row is None:
             raise ResourceNotFound("Interview Brief not found")
         records = self.list_records(task["interviewCaseId"])
+        known_names = (brief_row["full_name"],)
         asked_questions = [
             record["questionText"] for record in records
             if record["askedStatus"] in {"ASKED", "SKIPPED"}
         ]
         payload = {
             "schemaVersion": "ai.input.v1", "operation": "FOLLOW_UP",
-            "interviewBrief": json.loads(brief_row["brief_json"]),
-            "liveRecords": records,
+            "interviewBrief": sanitize_structure(
+                json.loads(brief_row["brief_json"]), known_names=known_names
+            ),
+            "liveRecords": [
+                {
+                    "sequenceNo": record["sequenceNo"],
+                    "questionText": sanitize_text(
+                        record["questionText"], known_names=known_names
+                    ),
+                    "askedStatus": record["askedStatus"],
+                    "liveNotes": sanitize_text(
+                        record["liveNotes"] or "", known_names=known_names
+                    ),
+                    "score": record["score"],
+                    "evidenceStatus": record["evidenceStatus"],
+                }
+                for record in records
+            ],
             "remainingCompetencies": [],
         }
         return self.tasks.process(

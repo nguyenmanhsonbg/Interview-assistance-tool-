@@ -5,15 +5,17 @@ import socket
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any, Callable
 
 from app.ai.provider import ProviderError
+from app.ai.prompts import PromptCatalog
 
 
 class HttpAIProvider:
     """Provider-neutral JSON-over-HTTP adapter using the Standard Library."""
 
-    def __init__(self, endpoint: str, *, api_key: str | None, model: str, timeout: float = 30, max_retry: int = 1, max_response_bytes: int = 2 * 1024 * 1024, opener: Callable[..., Any] = urllib.request.urlopen, sleep: Callable[[float], None] = time.sleep) -> None:
+    def __init__(self, endpoint: str, *, api_key: str | None, model: str, timeout: float = 30, max_retry: int = 1, max_response_bytes: int = 2 * 1024 * 1024, opener: Callable[..., Any] = urllib.request.urlopen, sleep: Callable[[float], None] = time.sleep, prompt_root: Path | None = None) -> None:
         self.endpoint = endpoint
         self.api_key = api_key
         self.model = model
@@ -22,6 +24,9 @@ class HttpAIProvider:
         self.max_response_bytes = max_response_bytes
         self.opener = opener
         self.sleep = sleep
+        self.prompts = PromptCatalog(
+            prompt_root or Path(__file__).resolve().parents[2] / "prompts"
+        )
 
     def generate_questions(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._call("GENERATE_QUESTIONS", payload)
@@ -33,7 +38,20 @@ class HttpAIProvider:
         return self._call("SUGGEST_FOLLOW_UP", payload)
 
     def _call(self, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
-        body = json.dumps({"operation": operation, "model": self.model, "input": payload}, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        prompt_key = {
+            "GENERATE_QUESTIONS": "question_generation",
+            "EVALUATE_ASSESSMENT": "answer_evaluation",
+            "SUGGEST_FOLLOW_UP": "follow_up_question",
+        }[operation]
+        body = json.dumps(
+            {
+                "operation": operation, "model": self.model,
+                "promptVersion": self.prompts.version(prompt_key),
+                "prompt": self.prompts.render(prompt_key, payload),
+                "input": payload,
+            },
+            ensure_ascii=False, separators=(",", ":"),
+        ).encode("utf-8")
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
