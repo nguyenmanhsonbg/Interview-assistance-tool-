@@ -12,8 +12,19 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from app.config import AppConfig
+from app.domain.errors import (
+    BackupRequired,
+    DomainError,
+    ForbiddenCapability,
+    ResourceNotFound,
+    StateConflict,
+    Unauthenticated,
+    UnsupportedMediaType,
+    ValidationError,
+)
 from app.responses import Response, error_response, success_response
 from app.router import MethodNotAllowed, Request, RouteNotFound, Router
+from app.security import LocalSecurity
 
 
 SECURITY_HEADERS = {
@@ -55,14 +66,29 @@ def _health_handler(config: AppConfig):
     return handler
 
 
-def create_server(config: AppConfig, *, router: Router | None = None) -> ClawCVHTTPServer:
+def create_server(
+    config: AppConfig,
+    *,
+    router: Router | None = None,
+    security: LocalSecurity | None = None,
+) -> ClawCVHTTPServer:
     app_router = router or Router()
+    local_security = security or LocalSecurity(None)
     app_router.add("GET", r"/api/v1/health", _health_handler(config))
-    handler = _handler_factory(config, app_router)
+    app_router.add(
+        "GET",
+        r"/api/v1/bootstrap",
+        lambda request: success_response(
+            {"startupToken": local_security.startup_token}, request.request_id
+        ),
+    )
+    handler = _handler_factory(config, app_router, local_security)
     return ClawCVHTTPServer((config.host, config.port), handler)
 
 
-def _handler_factory(config: AppConfig, router: Router) -> type[BaseHTTPRequestHandler]:
+def _handler_factory(
+    config: AppConfig, router: Router, security: LocalSecurity
+) -> type[BaseHTTPRequestHandler]:
     class RequestHandler(BaseHTTPRequestHandler):
         server_version = "ClawCV"
         sys_version = ""
@@ -87,6 +113,12 @@ def _handler_factory(config: AppConfig, router: Router) -> type[BaseHTTPRequestH
 
         def _handle(self) -> None:
             request_id = self.headers.get("X-Request-Id") or str(uuid.uuid4())
+            if not self._valid_host():
+                self._write_json(
+                    error_response("INVALID_HOST", "Invalid Host header", request_id, status=400),
+                    request_id,
+                )
+                return
             parsed = urlsplit(self.path)
             if not parsed.path.startswith("/api/v1/"):
                 if self.command != "GET":
@@ -122,6 +154,15 @@ def _handler_factory(config: AppConfig, router: Router) -> type[BaseHTTPRequestH
                 )
                 return
 
+            try:
+                self._validate_same_origin()
+                security_context = security.authorize(
+                    route.access_mode, self.command, self.headers
+                )
+            except DomainError as error:
+                self._write_json(_domain_error_response(error, request_id), request_id)
+                return
+
             body, failure = self._read_json_body(
                 request_id, route.max_body or config.max_json_body
             )
@@ -136,9 +177,12 @@ def _handler_factory(config: AppConfig, router: Router) -> type[BaseHTTPRequestH
                 query=parse_qs(parsed.query, keep_blank_values=True),
                 json_body=body,
                 path_params=path_params,
+                context=security_context,
             )
             try:
                 response = route.handler(request)
+            except DomainError as error:
+                response = _domain_error_response(error, request_id)
             except Exception:
                 response = error_response(
                     "INTERNAL_ERROR",
@@ -147,6 +191,23 @@ def _handler_factory(config: AppConfig, router: Router) -> type[BaseHTTPRequestH
                     status=500,
                 )
             self._write_json(response, request_id)
+
+        def _valid_host(self) -> bool:
+            supplied = self.headers.get("Host", "").lower()
+            port = self.server.server_address[1]
+            return supplied in {f"127.0.0.1:{port}", f"localhost:{port}"}
+
+        def _validate_same_origin(self) -> None:
+            if self.command not in {"POST", "PUT", "PATCH", "DELETE"}:
+                return
+            port = self.server.server_address[1]
+            allowed = {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
+            origin = self.headers.get("Origin")
+            if origin and origin.rstrip("/").lower() not in allowed:
+                raise ForbiddenCapability("Cross-origin mutation is not allowed")
+            referer = self.headers.get("Referer")
+            if referer and not any(referer.lower().startswith(value + "/") for value in allowed):
+                raise ForbiddenCapability("Cross-origin mutation is not allowed")
 
         def _read_json_body(
             self, request_id: str, maximum: int
@@ -215,6 +276,24 @@ def _handler_factory(config: AppConfig, router: Router) -> type[BaseHTTPRequestH
                 self.wfile.write(payload)
 
     return RequestHandler
+
+
+def _domain_error_response(error: DomainError, request_id: str) -> Response:
+    if isinstance(error, Unauthenticated):
+        status = 401
+    elif isinstance(error, ForbiddenCapability):
+        status = 403
+    elif isinstance(error, ResourceNotFound):
+        status = 404
+    elif isinstance(error, (BackupRequired, StateConflict)):
+        status = 409
+    elif isinstance(error, UnsupportedMediaType):
+        status = 415
+    elif isinstance(error, ValidationError):
+        status = 422
+    else:
+        status = 400
+    return error_response(error.code, str(error), request_id, status=status)
 
 
 def run(config: AppConfig, *, open_browser: bool = True) -> None:

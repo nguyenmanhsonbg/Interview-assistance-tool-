@@ -32,3 +32,7 @@ class ForbiddenCapability(DomainError):
 
 class RevisionConflict(StateConflict):
     code = "ANSWER_REVISION_CONFLICT"
+
+
+class BackupRequired(StateConflict):
+    code = "BACKUP_REQUIRED"
