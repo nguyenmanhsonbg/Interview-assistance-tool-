@@ -20,3 +20,15 @@ class UnsupportedMediaType(ValidationError):
 
 class DocumentParseError(ValidationError):
     code = "DOCUMENT_PARSE_FAILED"
+
+
+class Unauthenticated(DomainError):
+    code = "UNAUTHENTICATED"
+
+
+class ForbiddenCapability(DomainError):
+    code = "FORBIDDEN_CAPABILITY"
+
+
+class RevisionConflict(StateConflict):
+    code = "ANSWER_REVISION_CONFLICT"
