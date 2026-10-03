@@ -9,6 +9,39 @@ from app.repositories.base import RepositoryBase
 
 
 class EvaluationRepository(RepositoryBase):
+    def list_live_records(self, case_id: str) -> list[dict[str, Any]]:
+        return [
+            _live_dict(row)
+            for row in self.query_all(
+                """SELECT * FROM live_interview_records
+                   WHERE interview_case_id=? ORDER BY sequence_no""",
+                (case_id,),
+            )
+        ]
+
+    def get_live_record(self, case_id: str, sequence_no: int) -> dict[str, Any]:
+        row = self.query_one(
+            """SELECT * FROM live_interview_records
+               WHERE interview_case_id=? AND sequence_no=?""",
+            (case_id, sequence_no),
+        )
+        if row is None:
+            raise ResourceNotFound("Live interview record not found")
+        return _live_dict(row)
+
+    def current_evaluation(self, case_id: str) -> dict[str, Any] | None:
+        row = self.query_one(
+            "SELECT * FROM evaluations WHERE interview_case_id=? AND is_current=1",
+            (case_id,),
+        )
+        return None if row is None else _evaluation_dict(row)
+
+    def get_evaluation(self, evaluation_id: str) -> dict[str, Any]:
+        row = self.query_one("SELECT * FROM evaluations WHERE id=?", (evaluation_id,))
+        if row is None:
+            raise ResourceNotFound("Evaluation not found")
+        return _evaluation_dict(row)
+
     def current_brief(self, case_id: str) -> dict[str, Any] | None:
         row = self.query_one(
             "SELECT * FROM interview_briefs WHERE interview_case_id=? AND is_current=1",
@@ -79,4 +112,32 @@ def _brief_dict(row: sqlite3.Row) -> dict[str, Any]:
         "isCurrent": bool(row["is_current"]),
         "createdByMemberId": row["created_by_member_id"],
         "createdAt": row["created_at"],
+    }
+
+
+def _live_dict(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"], "interviewCaseId": row["interview_case_id"],
+        "interviewBriefId": row["interview_brief_id"],
+        "committeeMemberId": row["committee_member_id"],
+        "sequenceNo": row["sequence_no"], "questionText": row["question_text"],
+        "sourceKind": row["source_kind"], "askedStatus": row["asked_status"],
+        "liveNotes": row["live_notes"], "score": row["score"],
+        "evidenceStatus": row["evidence_status"], "askedAt": row["asked_at"],
+        "completedAt": row["completed_at"], "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+    }
+
+
+def _evaluation_dict(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"], "interviewCaseId": row["interview_case_id"],
+        "versionNo": row["version_no"], "status": row["status"],
+        "finalResult": row["final_result"], "finalLevel": row["final_level"],
+        "summary": row["summary"], "strengths": json.loads(row["strengths_json"]),
+        "gaps": json.loads(row["gaps_json"]), "risks": json.loads(row["risks_json"]),
+        "finalComment": row["final_comment"],
+        "decidedByMemberId": row["decided_by_member_id"], "decidedAt": row["decided_at"],
+        "supersedesEvaluationId": row["supersedes_evaluation_id"],
+        "isCurrent": bool(row["is_current"]), "createdAt": row["created_at"],
     }

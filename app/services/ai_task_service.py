@@ -60,7 +60,7 @@ class AITaskService:
                 metadata={"taskType": task_type, "resultType": result_type})
         return self.repository.get(task_id)
 
-    def process(self, task_id: str, provider: AIProvider, *, payload_override: dict[str, Any] | None = None) -> dict[str, Any]:
+    def process(self, task_id: str, provider: AIProvider, *, payload_override: dict[str, Any] | None = None, context_override: dict[str, Any] | None = None) -> dict[str, Any]:
         task = self.repository.get(task_id)
         if task["status"] == "COMPLETED":
             return task
@@ -80,7 +80,8 @@ class AITaskService:
             else:
                 output = provider.suggest_follow_up(payload)
                 operation = result_type = "FOLLOW_UP"
-            self.schemas.validate(operation, output, context=task["inputManifest"].get("context"))
+            context = context_override or task["inputManifest"].get("context")
+            self.schemas.validate(operation, output, context=context)
         except ProviderError as error:
             self._record_error(task, error.code, str(error), retryable=error.retryable)
             return self.repository.get(task_id)
