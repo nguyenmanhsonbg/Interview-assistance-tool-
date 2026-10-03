@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.coverage
+build/
+dist/
+release/
+*.db
+*.db-wal
+*.db-shm
+*.log

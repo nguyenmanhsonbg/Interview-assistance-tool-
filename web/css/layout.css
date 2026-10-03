@@ -1,0 +1,8 @@
+.app-shell { min-height: 100vh; }
+.app-header { display: flex; justify-content: space-between; align-items: center; padding: 1rem 2rem; color: white; background: #12324a; }
+.brand { color: white; font-size: 1.35rem; font-weight: 700; text-decoration: none; }
+.mode-label { padding: .25rem .65rem; border: 1px solid #8fb3cb; border-radius: 999px; }
+#primary-navigation { display: flex; gap: 1rem; padding: .75rem 2rem; background: white; border-bottom: 1px solid #d7e0e7; }
+#primary-navigation a { color: #174f78; }
+#main-content { width: min(1100px, calc(100% - 2rem)); margin: 2rem auto; }
+@media (max-width: 700px) { .app-header, #primary-navigation { padding-inline: 1rem; } }
