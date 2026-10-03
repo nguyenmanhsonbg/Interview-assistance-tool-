@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clawcv.local/schemas/question_generation.v1.json",
+  "title": "Question Generation Output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "operation",
+    "competencyMatrix",
+    "questions",
+    "gaps",
+    "conflicts",
+    "estimatedDurationSeconds",
+    "confidence",
+    "limitations"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "question-generation.v1" },
+    "operation": { "const": "QUESTION_GENERATION" },
+    "competencyMatrix": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "name", "required", "priority", "jdEvidence", "cvEvidence", "gap", "conflict"],
+        "properties": {
+          "key": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "required": { "type": "boolean" },
+          "priority": { "enum": ["REQUIRED", "HIGH", "MEDIUM", "LOW"] },
+          "jdEvidence": { "type": "string", "maxLength": 2000 },
+          "cvEvidence": { "type": "string", "maxLength": 2000 },
+          "gap": { "type": "string", "maxLength": 2000 },
+          "conflict": { "type": "string", "maxLength": 2000 }
+        }
+      }
+    },
+    "questions": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provisionalId",
+          "displayOrder",
+          "text",
+          "competencyKey",
+          "sourceKind",
+          "purpose",
+          "questionType",
+          "difficulty",
+          "expectedEvidence",
+          "rubric",
+          "isRequired",
+          "estimatedSeconds"
+        ],
+        "properties": {
+          "provisionalId": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "displayOrder": { "type": "integer", "minimum": 1, "maximum": 8 },
+          "text": { "type": "string", "minLength": 1, "maxLength": 3000 },
+          "competencyKey": { "type": "string", "minLength": 1, "maxLength": 100 },
+          "sourceKind": {
+            "enum": ["STANDARDIZED", "SITUATIONAL", "CV_VERIFICATION", "GAP_CONFLICT", "QUESTION_BANK", "MANUAL", "AI"]
+          },
+          "purpose": { "type": "string", "minLength": 1, "maxLength": 1000 },
+          "questionType": { "enum": ["SHORT_TEXT", "LONG_TEXT", "SCENARIO"] },
+          "difficulty": { "enum": ["EASY", "MEDIUM", "HARD"] },
+          "expectedEvidence": { "type": "string", "minLength": 1, "maxLength": 2000 },
+          "rubric": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["score0", "score1", "score2", "score3", "score4"],
+            "properties": {
+              "score0": { "type": "string", "minLength": 1, "maxLength": 1000 },
+              "score1": { "type": "string", "minLength": 1, "maxLength": 1000 },
+              "score2": { "type": "string", "minLength": 1, "maxLength": 1000 },
+              "score3": { "type": "string", "minLength": 1, "maxLength": 1000 },
+              "score4": { "type": "string", "minLength": 1, "maxLength": 1000 }
+            }
+          },
+          "isRequired": { "type": "boolean" },
+          "estimatedSeconds": { "type": "integer", "minimum": 1, "maximum": 900 }
+        }
+      }
+    },
+    "gaps": { "type": "array", "items": { "type": "string", "maxLength": 2000 }, "maxItems": 30 },
+    "conflicts": { "type": "array", "items": { "type": "string", "maxLength": 2000 }, "maxItems": 30 },
+    "estimatedDurationSeconds": { "type": "integer", "minimum": 600, "maximum": 900 },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "limitations": { "type": "array", "items": { "type": "string", "maxLength": 2000 }, "maxItems": 20 }
+  }
+}
