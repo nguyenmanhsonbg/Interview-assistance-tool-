@@ -60,7 +60,7 @@ class AITaskService:
                 metadata={"taskType": task_type, "resultType": result_type})
         return self.repository.get(task_id)
 
-    def process(self, task_id: str, provider: AIProvider) -> dict[str, Any]:
+    def process(self, task_id: str, provider: AIProvider, *, payload_override: dict[str, Any] | None = None) -> dict[str, Any]:
         task = self.repository.get(task_id)
         if task["status"] == "COMPLETED":
             return task
@@ -69,7 +69,7 @@ class AITaskService:
         with self.database.transaction() as connection:
             self.repository.mark_running(connection, task_id)
         try:
-            payload = task["inputManifest"].get("payload", task["inputManifest"])
+            payload = payload_override or task["inputManifest"].get("payload", task["inputManifest"])
             if task["taskType"] == "GENERATE_QUESTIONS":
                 output = provider.generate_questions(payload)
                 operation = result_type = "QUESTION_GENERATION"
@@ -121,6 +121,12 @@ class AITaskService:
             if failed and task["taskType"] == "GENERATE_QUESTIONS":
                 connection.execute(
                     """UPDATE interview_cases SET status='QUESTION_GENERATION_FAILED',
+                       updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
+                    (task["interviewCaseId"],),
+                )
+            if failed and task["taskType"] in {"EVALUATE_ASSESSMENT", "GENERATE_BRIEF"}:
+                connection.execute(
+                    """UPDATE interview_cases SET status='AI_ANALYSIS_FAILED',
                        updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
                     (task["interviewCaseId"],),
                 )
