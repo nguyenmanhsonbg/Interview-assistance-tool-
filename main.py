@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import os
 
-from app.ai.http_provider import HttpAIProvider
+from app.ai.factory import build_ai_provider
 from app.application import create_application
 from app.config import AppConfig
 from app.infrastructure.single_instance import SingleInstanceError, SingleInstanceLock
 from app.server import run
+from app.services.audit_service import configure_safe_logger
 
 
 def main() -> None:
@@ -17,17 +18,10 @@ def main() -> None:
     except SingleInstanceError as error:
         raise SystemExit(str(error)) from error
     application = None
+    safe_logger = None
     try:
-        provider = None
-        if config.ai_endpoint:
-            provider = HttpAIProvider(
-                config.ai_endpoint,
-                api_key=config.ai_api_key,
-                model=config.ai_model,
-                timeout=config.ai_timeout_seconds,
-                max_retry=0,
-                max_response_bytes=config.max_ai_response,
-            )
+        safe_logger = configure_safe_logger(config.data_directory / "logs" / "app.log")
+        provider = build_ai_provider(config, logger=safe_logger)
         application = create_application(
             config,
             provider=provider,
@@ -42,6 +36,10 @@ def main() -> None:
     finally:
         if application is not None:
             application.stop()
+        if safe_logger is not None:
+            for handler in list(safe_logger.handlers):
+                handler.close()
+                safe_logger.removeHandler(handler)
         lock.release()
 
 
