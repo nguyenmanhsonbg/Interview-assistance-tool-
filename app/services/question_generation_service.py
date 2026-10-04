@@ -15,8 +15,17 @@ from app.services.question_service import QuestionService
 
 
 class QuestionGenerationService:
-    def __init__(self, database: Database, schema_root: Path) -> None:
+    def __init__(
+        self,
+        database: Database,
+        schema_root: Path,
+        *,
+        provider_name: str | None = None,
+        model_name: str | None = None,
+    ) -> None:
         self.database = database
+        self.provider_name = provider_name
+        self.model_name = model_name
         self.tasks = AITaskService(database, SchemaRegistry(schema_root))
         self.questions = QuestionService(database)
 
@@ -61,6 +70,7 @@ class QuestionGenerationService:
         return self.tasks.enqueue(
             case_id, "GENERATE_QUESTIONS", input_manifest=manifest,
             input_fingerprint=fingerprint, idempotency_key=idempotency_key,
+            provider=self.provider_name, model=self.model_name,
         )
 
     def process(self, task_id: str, provider: AIProvider) -> dict[str, Any]:

@@ -31,6 +31,9 @@ class APIController:
         schema_root,
         security: LocalSecurity,
         submit_task: Callable[[str], None],
+        *,
+        ai_provider_name: str | None = None,
+        ai_model_name: str | None = None,
     ) -> None:
         self.database = database
         self.security = security
@@ -38,11 +41,25 @@ class APIController:
         self.cases = CaseService(database)
         self.documents = DocumentService(database, data_root)
         self.questions = QuestionService(database)
-        self.question_generation = QuestionGenerationService(database, schema_root)
+        self.question_generation = QuestionGenerationService(
+            database,
+            schema_root,
+            provider_name=ai_provider_name,
+            model_name=ai_model_name,
+        )
         self.assessments = AssessmentService(database)
-        self.evaluations = EvaluationService(database, schema_root)
+        self.evaluations = EvaluationService(
+            database,
+            schema_root,
+            provider_name=ai_provider_name,
+            model_name=ai_model_name,
+        )
         self.briefs = InterviewBriefService(database)
-        self.interviews = InterviewService(database)
+        self.interviews = InterviewService(
+            database,
+            provider_name=ai_provider_name,
+            model_name=ai_model_name,
+        )
         self.backups = BackupService(database, data_root)
         self.queries = ApplicationQueryService(database)
         self.tasks = AITaskRepository(database)

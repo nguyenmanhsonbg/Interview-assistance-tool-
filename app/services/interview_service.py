@@ -23,8 +23,16 @@ _EVIDENCE_STATUSES = {
 
 
 class InterviewService:
-    def __init__(self, database: Database) -> None:
+    def __init__(
+        self,
+        database: Database,
+        *,
+        provider_name: str | None = None,
+        model_name: str | None = None,
+    ) -> None:
         self.database = database
+        self.provider_name = provider_name
+        self.model_name = model_name
         self.repository = EvaluationRepository(database)
         schema_root = Path(__file__).resolve().parents[2] / "schemas"
         self.tasks = AITaskService(database, SchemaRegistry(schema_root))
@@ -167,6 +175,7 @@ class InterviewService:
         return self.tasks.enqueue(
             case_id, "SUGGEST_FOLLOW_UP", input_manifest=manifest,
             input_fingerprint=fingerprint, idempotency_key=idempotency_key,
+            provider=self.provider_name, model=self.model_name,
         )
 
     def process_follow_up(self, task_id: str, provider: AIProvider) -> dict[str, Any]:

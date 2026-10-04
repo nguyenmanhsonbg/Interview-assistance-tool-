@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from app.ai.gemini_provider import GeminiAIProvider
+from app.ai.gemini_provider import GeminiAIProvider, normalize_model_ids
 from app.ai.http_provider import HttpAIProvider
 from app.ai.provider import AIProvider
 from app.config import AppConfig
@@ -29,3 +29,11 @@ def build_ai_provider(
             max_response_bytes=config.max_ai_response,
         )
     return None
+
+
+def configured_ai_metadata(config: AppConfig) -> tuple[str | None, str | None]:
+    if config.ai_provider == "gemini":
+        return "gemini", normalize_model_ids(config.gemini_models)[0]
+    if config.ai_endpoint:
+        return "generic", config.ai_model
+    return None, None

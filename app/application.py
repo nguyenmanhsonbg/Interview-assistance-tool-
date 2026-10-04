@@ -5,6 +5,7 @@ from pathlib import Path
 import threading
 from typing import Any
 
+from app.ai.factory import configured_ai_metadata
 from app.ai.provider import AIProvider, ProviderError
 from app.ai.schemas import SchemaRegistry
 from app.ai.task_worker import AITaskWorker
@@ -23,12 +24,25 @@ from app.services.question_generation_service import QuestionGenerationService
 
 
 class _TaskProcessor:
-    def __init__(self, database: Database, schema_root: Path) -> None:
+    def __init__(
+        self,
+        database: Database,
+        schema_root: Path,
+        *,
+        provider_name: str | None = None,
+        model_name: str | None = None,
+    ) -> None:
         self.tasks = AITaskService(database, SchemaRegistry(schema_root))
-        self.questions = QuestionGenerationService(database, schema_root)
-        self.evaluations = EvaluationService(database, schema_root)
+        self.questions = QuestionGenerationService(
+            database, schema_root, provider_name=provider_name, model_name=model_name
+        )
+        self.evaluations = EvaluationService(
+            database, schema_root, provider_name=provider_name, model_name=model_name
+        )
         self.briefs = InterviewBriefService(database)
-        self.interviews = InterviewService(database)
+        self.interviews = InterviewService(
+            database, provider_name=provider_name, model_name=model_name
+        )
 
     def process(self, task_id: str, provider: AIProvider) -> dict[str, Any]:
         task = self.evaluations.tasks.repository.get(task_id)
@@ -132,12 +146,20 @@ def create_application(
         security.set_committee_pin(initial_pin)
     schemas = SchemaRegistry(root / "schemas")
     task_service = AITaskService(database, schemas)
-    processor = _TaskProcessor(database, root / "schemas")
+    provider_name, model_name = configured_ai_metadata(config)
+    processor = _TaskProcessor(
+        database,
+        root / "schemas",
+        provider_name=provider_name,
+        model_name=model_name,
+    )
     worker = AITaskWorker(processor, provider or _UnavailableProvider())
     router = Router()
     application = Application(config, database, router, security, task_service, worker)
     APIController(
         database, config.data_directory, root / "schemas", security,
         application.submit_task,
+        ai_provider_name=provider_name,
+        ai_model_name=model_name,
     ).register(router)
     return application

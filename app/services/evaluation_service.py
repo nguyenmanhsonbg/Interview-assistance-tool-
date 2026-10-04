@@ -17,8 +17,17 @@ from app.services.ai_task_service import AITaskService
 
 
 class EvaluationService:
-    def __init__(self, database: Database, schema_root: Path) -> None:
+    def __init__(
+        self,
+        database: Database,
+        schema_root: Path,
+        *,
+        provider_name: str | None = None,
+        model_name: str | None = None,
+    ) -> None:
         self.database = database
+        self.provider_name = provider_name
+        self.model_name = model_name
         self.tasks = AITaskService(database, SchemaRegistry(schema_root))
         self.repository = EvaluationRepository(database)
 
@@ -55,6 +64,8 @@ class EvaluationService:
             input_manifest=manifest,
             input_fingerprint=fingerprint,
             idempotency_key=idempotency_key,
+            provider=self.provider_name,
+            model=self.model_name,
         )
         with self.database.transaction() as connection:
             connection.execute(

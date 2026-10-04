@@ -68,6 +68,33 @@ class AITaskTests(MigratedDatabaseFixture, unittest.TestCase):
             result_count = connection.execute("SELECT COUNT(*) FROM ai_results").fetchone()[0]
         self.assertEqual(1, result_count)
 
+    def test_question_task_records_provider_metadata(self):
+        from pathlib import Path
+
+        from app.services.document_service import DocumentService
+        from app.services.question_generation_service import QuestionGenerationService
+
+        documents = DocumentService(self.database, self.data_root)
+        jd = documents.import_manual_text(self.case["id"], "JD", "Senior role")
+        cv = documents.import_manual_text(self.case["id"], "CV", "Relevant experience")
+        documents.confirm(jd["id"], jd["contentSha256"])
+        documents.confirm(cv["id"], cv["contentSha256"])
+
+        service = QuestionGenerationService(
+            self.database,
+            Path(__file__).resolve().parents[1] / "schemas",
+            provider_name="gemini",
+            model_name="gemini-3.6-flash",
+        )
+        task = service.request(self.case["id"], idempotency_key="metadata-key")
+
+        with self.database.connection() as connection:
+            row = connection.execute(
+                "SELECT provider, model FROM ai_tasks WHERE id=?", (task["id"],)
+            ).fetchone()
+        self.assertEqual("gemini", row["provider"])
+        self.assertEqual("gemini-3.6-flash", row["model"])
+
     def test_retry_once_then_fail_and_restart_recovery(self):
         from app.ai.provider import ProviderError
         from app.ai.schemas import SchemaRegistry
