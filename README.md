@@ -31,6 +31,24 @@ $env:AI_API_KEY = "session-secret"
 python main.py
 ```
 
+Để dùng Gemini trực tiếp thay cho approved gateway, đặt provider và API key:
+
+```powershell
+$env:AI_PROVIDER = "gemini"
+$env:GEMINI_API_KEY = "your-gemini-api-key"
+$env:GEMINI_CV_PARSE_MODELS = "gemini-3.6-flash,gemini-3.5-flash,gemini-3.5-flash-lite"
+$env:GEMINI_CV_PARSE_TIMEOUT_MS = "45000"
+python main.py
+```
+
+Gemini được gọi qua REST `generateContent`. Ứng dụng xoay vòng các model khi
+gặp lỗi retryable, ghi provider/model vào metadata của AI task, và vẫn giữ
+manual fallback khi provider không khả dụng. Chỉ text đã được extract,
+sanitize và confirm mới được gửi; không gửi raw file, base64, PIN, token hoặc
+API key. Kiểm tra model ID và chính sách dữ liệu của tài khoản Gemini trước
+khi pilot. Nếu chưa cấu hình `AI_PROVIDER=gemini`, runtime mặc định dùng
+provider generic hiện có.
+
 Gateway nhận JSON `operation`, `model`, `promptVersion`, `prompt` và `input`; response phải là đúng một JSON object theo schema trong `schemas/`. Chỉ text đã xác nhận/sanitize được gửi; raw file, PIN và token không được gửi. API key chỉ đọc từ environment trong MVP và không được lưu vào database, frontend, log, backup hoặc export.
 
 ## Backup, restore và dữ liệu
