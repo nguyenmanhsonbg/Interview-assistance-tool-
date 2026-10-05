@@ -21,7 +21,7 @@ class MigrationTests(unittest.TestCase):
         from app.migrations import MigrationRunner
 
         runner = MigrationRunner(self.database, self.migrations)
-        self.assertEqual([1], runner.apply_all())
+        self.assertEqual([1, 2], runner.apply_all())
         self.assertEqual([], runner.apply_all())
 
         with self.database.connection() as connection:
@@ -44,12 +44,12 @@ class MigrationTests(unittest.TestCase):
                 "SELECT version FROM schema_migrations ORDER BY version"
             ).fetchall()
 
-        self.assertEqual(17, len(tables))
+        self.assertEqual(20, len(tables))
         self.assertIn("interview_briefs", tables)
         self.assertEqual(3, len(triggers))
         self.assertEqual("8", settings["assessment.default_question_count"])
         self.assertEqual("MANUAL_ONLY", settings["retention.mode"])
-        self.assertEqual([1], [row[0] for row in versions])
+        self.assertEqual([1, 2], [row[0] for row in versions])
 
     def test_question_and_answer_lock_triggers_enforce_immutable_snapshots(self):
         from app.migrations import MigrationRunner
