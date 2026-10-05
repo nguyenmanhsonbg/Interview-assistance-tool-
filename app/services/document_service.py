@@ -175,8 +175,13 @@ class DocumentService:
                 case_status = row["case_status"]
             connection.execute(
                 """UPDATE interview_cases SET status=?,
+                   refined_flow_status=?,
                    updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
-                (case_status, row["interview_case_id"]),
+                (
+                    case_status,
+                    "DOCUMENTS_READY" if count == 2 else "DRAFT",
+                    row["interview_case_id"],
+                ),
             )
             append_audit(
                 connection,
@@ -253,6 +258,9 @@ class DocumentService:
                 """UPDATE interview_cases SET status=CASE
                        WHEN status IN ('DRAFT','DOCUMENT_PARSE_FAILED','DOCUMENTS_READY')
                        THEN 'DRAFT' ELSE status END,
+                   refined_flow_status=CASE
+                       WHEN status IN ('DRAFT','DOCUMENT_PARSE_FAILED','DOCUMENTS_READY')
+                       THEN 'DRAFT' ELSE refined_flow_status END,
                    updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
                 (case_id,),
             )

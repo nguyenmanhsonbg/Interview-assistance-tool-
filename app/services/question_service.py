@@ -91,6 +91,10 @@ class QuestionService:
                 "UPDATE question_sets SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?",
                 (question_set_id,),
             )
+            connection.execute(
+                "UPDATE interview_cases SET refined_flow_status='QUESTIONS_GENERATED' WHERE id=?",
+                (row["interview_case_id"],),
+            )
             append_audit(
                 connection,
                 actor_type="COMMITTEE",
@@ -133,6 +137,7 @@ class QuestionService:
             )
             connection.execute(
                 """UPDATE interview_cases SET status='QUESTIONS_APPROVED',
+                   refined_flow_status='QUESTIONS_GENERATED',
                    updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
                 (row["interview_case_id"],),
             )
@@ -210,6 +215,7 @@ class QuestionService:
             _insert_questions(connection, question_set_id, questions)
             connection.execute(
                 """UPDATE interview_cases SET status='QUESTIONS_GENERATED',
+                   refined_flow_status='QUESTIONS_GENERATED',
                    updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
                 (case_id,),
             )
