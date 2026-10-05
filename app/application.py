@@ -51,7 +51,11 @@ class _TaskProcessor:
                 return self.questions.process(task_id, provider)
             if task["taskType"] in {"EVALUATE_ASSESSMENT", "GENERATE_BRIEF"}:
                 result = self.evaluations.process(task_id, provider)
-                if result["status"] == "COMPLETED" and task["taskType"] == "EVALUATE_ASSESSMENT":
+                if (
+                    result["status"] == "COMPLETED"
+                    and task["taskType"] == "EVALUATE_ASSESSMENT"
+                    and task.get("assessmentSnapshotId") is None
+                ):
                     self.briefs.materialize_ai(task_id)
                 return result
             if task["taskType"] == "SUGGEST_FOLLOW_UP":

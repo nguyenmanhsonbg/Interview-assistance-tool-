@@ -30,6 +30,9 @@ class AITaskRepository(RepositoryBase):
                      OR
                      (t.task_type IN ('EVALUATE_ASSESSMENT','GENERATE_BRIEF')
                       AND ic.status='AI_ANALYZING')
+                     OR
+                     (t.assessment_snapshot_id IS NOT NULL
+                      AND ic.refined_flow_status='AI_ANALYZING')
                    )
                    ORDER BY t.created_at, t.id"""
             )
@@ -48,14 +51,22 @@ class AITaskRepository(RepositoryBase):
         row = self.query_one("SELECT id FROM ai_tasks WHERE idempotency_key=?", (key,))
         return None if row is None else self.get(row["id"])
 
-    def insert(self, connection: sqlite3.Connection, *, task_id: str, case_id: str, assessment_attempt_id: str | None, task_type: str, idempotency_key: str, input_fingerprint: str, input_manifest: dict[str, Any], provider: str | None, model: str | None, prompt_key: str, prompt_version: str, schema_version: str, max_retry: int) -> None:
+    def current_result(self, case_id: str, result_type: str) -> dict[str, Any] | None:
+        row = self.query_one(
+            """SELECT * FROM ai_results
+               WHERE interview_case_id=? AND result_type=? AND is_current=1""",
+            (case_id, result_type),
+        )
+        return None if row is None else _result_dict(row)
+
+    def insert(self, connection: sqlite3.Connection, *, task_id: str, case_id: str, assessment_attempt_id: str | None, assessment_snapshot_id: str | None, task_type: str, idempotency_key: str, input_fingerprint: str, input_manifest: dict[str, Any], provider: str | None, model: str | None, prompt_key: str, prompt_version: str, schema_version: str, max_retry: int) -> None:
         connection.execute(
             """INSERT INTO ai_tasks(
-                id, interview_case_id, assessment_attempt_id, task_type,
+                id, interview_case_id, assessment_attempt_id, assessment_snapshot_id, task_type,
                 idempotency_key, input_fingerprint, input_manifest_json,
                 provider, model, prompt_key, prompt_version, schema_version, max_retry
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (task_id, case_id, assessment_attempt_id, task_type, idempotency_key,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (task_id, case_id, assessment_attempt_id, assessment_snapshot_id, task_type, idempotency_key,
              input_fingerprint, json.dumps(input_manifest, ensure_ascii=False, separators=(",", ":")),
              provider, model, prompt_key, prompt_version, schema_version, max_retry),
         )
@@ -91,11 +102,11 @@ class AITaskRepository(RepositoryBase):
         result_id = str(uuid.uuid4())
         connection.execute(
             """INSERT INTO ai_results(
-                id, ai_task_id, interview_case_id, assessment_attempt_id,
+                id, ai_task_id, interview_case_id, assessment_attempt_id, assessment_snapshot_id,
                 result_type, version_no, supersedes_result_id, payload_json,
                 confidence, is_current
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
-            (result_id, task["id"], task["interviewCaseId"], task["assessmentAttemptId"],
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+            (result_id, task["id"], task["interviewCaseId"], task["assessmentAttemptId"], task["assessmentSnapshotId"],
              result_type, version, None if previous is None else previous["id"],
              json.dumps(payload, ensure_ascii=False, separators=(",", ":")), payload.get("confidence")),
         )
@@ -110,7 +121,7 @@ class AITaskRepository(RepositoryBase):
 def _task_dict(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": row["id"], "interviewCaseId": row["interview_case_id"],
-        "assessmentAttemptId": row["assessment_attempt_id"], "taskType": row["task_type"],
+        "assessmentAttemptId": row["assessment_attempt_id"], "assessmentSnapshotId": row["assessment_snapshot_id"], "taskType": row["task_type"],
         "status": row["status"], "idempotencyKey": row["idempotency_key"],
         "inputFingerprint": row["input_fingerprint"], "inputManifest": json.loads(row["input_manifest_json"]),
         "provider": row["provider"], "model": row["model"], "promptKey": row["prompt_key"],
@@ -124,6 +135,7 @@ def _task_dict(row: sqlite3.Row) -> dict[str, Any]:
 def _result_dict(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": row["id"], "aiTaskId": row["ai_task_id"], "resultType": row["result_type"],
+        "assessmentSnapshotId": row["assessment_snapshot_id"],
         "versionNo": row["version_no"], "payload": json.loads(row["payload_json"]),
         "confidence": row["confidence"], "isCurrent": bool(row["is_current"]), "createdAt": row["created_at"],
     }

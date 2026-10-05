@@ -46,6 +46,35 @@ def answer_evaluation_payload(answered=True):
     }
 
 
+def answer_evaluation_v2_payload(answered=True):
+    return {
+        "schemaVersion": "answer-evaluation.v2",
+        "operation": "ANSWER_EVALUATION",
+        "perAnswerEvaluations": [
+            {
+                "answerId": "answer-1", "questionId": "question-1",
+                "score": 3 if answered else None,
+                "evidenceStatus": "VERIFIED" if answered else "NOT_ASSESSED",
+                "reasoning": "Evidence matches rubric" if answered else "No answer provided",
+                "evidenceFound": ["Specific example"] if answered else [],
+                "concerns": [],
+                "cvConsistency": "CONSISTENT" if answered else "NOT_ASSESSED",
+            }
+        ],
+        "competencyEvaluations": [
+            {
+                "competencyKey": "backend", "summary": "Meets expectation",
+                "evidenceStatus": "VERIFIED" if answered else "NOT_ASSESSED",
+                "confidence": 0.8,
+            }
+        ],
+        "strengths": ["Clear reasoning"] if answered else [],
+        "gaps": [], "conflicts": [], "risks": [],
+        "confidence": 0.8,
+        "limitations": [],
+    }
+
+
 def follow_up_payload():
     return {
         "schemaVersion": "follow-up.v1",

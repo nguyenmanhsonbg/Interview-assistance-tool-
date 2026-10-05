@@ -14,7 +14,7 @@ from app.repositories.audit import append_audit
 
 _TASK_CONFIG = {
     "GENERATE_QUESTIONS": ("QUESTION_GENERATION", "question_generation", "question-generation.v1"),
-    "EVALUATE_ASSESSMENT": ("ANSWER_EVALUATION", "answer_evaluation", "answer-evaluation.v1"),
+    "EVALUATE_ASSESSMENT": ("ANSWER_EVALUATION", "answer_evaluation_v2", "answer-evaluation.v2"),
     "GENERATE_BRIEF": ("INTERVIEW_BRIEF", "answer_evaluation", "answer-evaluation.v1"),
     "SUGGEST_FOLLOW_UP": ("FOLLOW_UP", "follow_up_question", "follow-up.v1"),
 }
@@ -26,7 +26,7 @@ class AITaskService:
         self.schemas = schemas
         self.repository = AITaskRepository(database)
 
-    def enqueue(self, case_id: str, task_type: str, *, input_manifest: dict[str, Any], input_fingerprint: str, idempotency_key: str, assessment_attempt_id: str | None = None, provider: str | None = None, model: str | None = None, max_retry: int = 1) -> dict[str, Any]:
+    def enqueue(self, case_id: str, task_type: str, *, input_manifest: dict[str, Any], input_fingerprint: str, idempotency_key: str, assessment_attempt_id: str | None = None, assessment_snapshot_id: str | None = None, provider: str | None = None, model: str | None = None, max_retry: int = 1, prompt_key: str | None = None, schema_version: str | None = None) -> dict[str, Any]:
         if task_type not in _TASK_CONFIG:
             raise ValidationError("Unsupported AI task type")
         if not re.fullmatch(r"[0-9a-fA-F]{64}", input_fingerprint):
@@ -39,7 +39,9 @@ class AITaskService:
                 raise StateConflict("Idempotency key was already used for different input")
             return existing
 
-        result_type, prompt_key, schema_version = _TASK_CONFIG[task_type]
+        result_type, configured_prompt_key, configured_schema_version = _TASK_CONFIG[task_type]
+        prompt_key = prompt_key or configured_prompt_key
+        schema_version = schema_version or configured_schema_version
         task_id = str(uuid.uuid4())
         with self.database.transaction() as connection:
             case = connection.execute("SELECT status FROM interview_cases WHERE id=?", (case_id,)).fetchone()
@@ -50,7 +52,8 @@ class AITaskService:
                     raise StateConflict("Case is not ready for question generation")
                 connection.execute("UPDATE interview_cases SET status='QUESTIONS_GENERATING', updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?", (case_id,))
             self.repository.insert(connection, task_id=task_id, case_id=case_id,
-                assessment_attempt_id=assessment_attempt_id, task_type=task_type,
+                assessment_attempt_id=assessment_attempt_id,
+                assessment_snapshot_id=assessment_snapshot_id, task_type=task_type,
                 idempotency_key=idempotency_key, input_fingerprint=input_fingerprint.lower(),
                 input_manifest=input_manifest, provider=provider, model=model,
                 prompt_key=prompt_key, prompt_version=schema_version,
@@ -86,7 +89,9 @@ class AITaskService:
                 output = provider.suggest_follow_up(payload)
                 operation = result_type = "FOLLOW_UP"
             context = context_override or task["inputManifest"].get("context")
-            self.schemas.validate(operation, output, context=context)
+            self.schemas.validate(
+                operation, output, context=context, schema_version=task["schemaVersion"]
+            )
         except ProviderError as error:
             self._record_error(task, error.code, str(error), retryable=error.retryable)
             return self.repository.get(task_id)
@@ -201,3 +206,9 @@ class AITaskService:
                    updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
                 (case_id,),
             )
+            if task.get("assessment_snapshot_id") or task.get("assessmentSnapshotId"):
+                connection.execute(
+                    """UPDATE interview_cases SET refined_flow_status='AI_ANALYSIS_FAILED',
+                       updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
+                    (case_id,),
+                )

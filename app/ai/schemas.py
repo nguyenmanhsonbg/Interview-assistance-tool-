@@ -9,9 +9,12 @@ from app.domain.errors import ValidationError
 
 
 _SCHEMA_FILES = {
-    "QUESTION_GENERATION": "question_generation.schema.json",
-    "ANSWER_EVALUATION": "answer_evaluation.schema.json",
-    "FOLLOW_UP": "follow_up_question.schema.json",
+    "QUESTION_GENERATION": {"question-generation.v1": "question_generation.schema.json"},
+    "ANSWER_EVALUATION": {
+        "answer-evaluation.v1": "answer_evaluation.schema.json",
+        "answer-evaluation.v2": "answer_evaluation.v2.schema.json",
+    },
+    "FOLLOW_UP": {"follow-up.v1": "follow_up_question.schema.json"},
 }
 
 
@@ -19,15 +22,32 @@ class SchemaRegistry:
     """Validate the JSON-Schema subset used by the three versioned AI contracts."""
 
     def __init__(self, root: Path) -> None:
+        root = Path(root)
         self.schemas = {
-            operation: json.loads((Path(root) / filename).read_text(encoding="utf-8"))
-            for operation, filename in _SCHEMA_FILES.items()
+            operation: {
+                version: json.loads((root / filename).read_text(encoding="utf-8"))
+                for version, filename in files.items()
+            }
+            for operation, files in _SCHEMA_FILES.items()
         }
 
-    def validate(self, operation: str, payload: Any, *, context: dict[str, Any] | None = None) -> dict[str, Any]:
+    def validate(
+        self,
+        operation: str,
+        payload: Any,
+        *,
+        context: dict[str, Any] | None = None,
+        schema_version: str | None = None,
+    ) -> dict[str, Any]:
         if operation not in self.schemas:
             raise ValidationError(f"Unknown AI output operation: {operation}")
-        _validate_node(payload, self.schemas[operation], "$")
+        version = schema_version or (
+            payload.get("schemaVersion") if isinstance(payload, dict) else None
+        )
+        schema = self.schemas[operation].get(version)
+        if schema is None:
+            raise ValidationError(f"Unsupported AI schema version: {version}")
+        _validate_node(payload, schema, "$")
         if operation == "QUESTION_GENERATION":
             _validate_question_rules(payload)
         elif operation == "ANSWER_EVALUATION":

@@ -12,6 +12,7 @@ from app.ai.schemas import SchemaRegistry
 from app.database import Database
 from app.domain.errors import ForbiddenCapability, ResourceNotFound, StateConflict, ValidationError
 from app.repositories.audit import append_audit
+from app.repositories.assessment_snapshots import AssessmentSnapshotRepository
 from app.repositories.evaluations import EvaluationRepository
 from app.services.ai_task_service import AITaskService
 
@@ -30,6 +31,7 @@ class EvaluationService:
         self.model_name = model_name
         self.tasks = AITaskService(database, SchemaRegistry(schema_root))
         self.repository = EvaluationRepository(database)
+        self.snapshots = AssessmentSnapshotRepository(database)
 
     def request(
         self,
@@ -66,6 +68,8 @@ class EvaluationService:
             idempotency_key=idempotency_key,
             provider=self.provider_name,
             model=self.model_name,
+            prompt_key="answer_evaluation",
+            schema_version="answer-evaluation.v1",
         )
         with self.database.transaction() as connection:
             connection.execute(
@@ -75,12 +79,79 @@ class EvaluationService:
             )
         return task
 
+    def request_snapshot(
+        self,
+        case_id: str,
+        snapshot_id: str,
+        *,
+        idempotency_key: str,
+        force_rerun: bool = False,
+    ) -> dict[str, Any]:
+        snapshot = self.snapshots.get(snapshot_id)
+        if snapshot["interviewCaseId"] != case_id:
+            raise ResourceNotFound("Assessment snapshot not found")
+        manifest = self._snapshot_manifest(snapshot)
+        canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        fingerprint = hashlib.sha256(canonical).hexdigest()
+        with self.database.connection() as connection:
+            case = connection.execute(
+                "SELECT refined_flow_status FROM interview_cases WHERE id=?", (case_id,)
+            ).fetchone()
+        if case is None:
+            raise ResourceNotFound("Interview case not found")
+        allowed = {"ANSWERS_IMPORTED", "AI_ANALYSIS_FAILED"}
+        if force_rerun:
+            allowed.add("AI_EVALUATED")
+        if case["refined_flow_status"] == "AI_ANALYZING":
+            existing = self.tasks.repository.find_by_idempotency_key(idempotency_key)
+            if existing is not None:
+                return existing
+        if case["refined_flow_status"] not in allowed:
+            raise StateConflict("Assessment snapshot is not ready for AI evaluation")
+        task = self.tasks.enqueue(
+            case_id,
+            "EVALUATE_ASSESSMENT",
+            assessment_snapshot_id=snapshot_id,
+            input_manifest=manifest,
+            input_fingerprint=fingerprint,
+            idempotency_key=idempotency_key,
+            provider=self.provider_name,
+            model=self.model_name,
+        )
+        with self.database.transaction() as connection:
+            connection.execute(
+                """UPDATE interview_cases SET refined_flow_status='AI_ANALYZING',
+                   updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
+                (case_id,),
+            )
+            connection.execute(
+                "UPDATE assessment_snapshots SET status='AI_ANALYZING' WHERE id=?",
+                (snapshot_id,),
+            )
+        return task
+
     def process(self, task_id: str, provider: AIProvider) -> dict[str, Any]:
         task = self.tasks.repository.get(task_id)
         payload = self.provider_payload(task)
-        return self.tasks.process(task_id, provider, payload_override=payload)
+        result = self.tasks.process(task_id, provider, payload_override=payload)
+        snapshot_id = task.get("assessmentSnapshotId")
+        if snapshot_id and result["status"] in {"COMPLETED", "FAILED"}:
+            status = "AI_EVALUATED" if result["status"] == "COMPLETED" else "AI_ANALYSIS_FAILED"
+            with self.database.transaction() as connection:
+                connection.execute(
+                    "UPDATE assessment_snapshots SET status=? WHERE id=?",
+                    (status, snapshot_id),
+                )
+                connection.execute(
+                    """UPDATE interview_cases SET refined_flow_status=?,
+                       updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
+                    (status, task["interviewCaseId"]),
+                )
+        return result
 
     def provider_payload(self, task: dict[str, Any]) -> dict[str, Any]:
+        if task.get("assessmentSnapshotId"):
+            return self._snapshot_provider_payload(task)
         case_id = task["interviewCaseId"]
         attempt_id = task["assessmentAttemptId"]
         manifest = task["inputManifest"]
@@ -149,6 +220,129 @@ class EvaluationService:
                     ),
                 }
                 for answer in answers
+            ],
+        }
+
+    def current_ai_result(self, case_id: str) -> dict[str, Any]:
+        result = self.tasks.repository.current_result(case_id, "ANSWER_EVALUATION")
+        if result is None:
+            raise ResourceNotFound("AI evaluation result not found")
+        return result
+
+    def refined_status(self, case_id: str) -> str:
+        with self.database.connection() as connection:
+            row = connection.execute(
+                "SELECT refined_flow_status, status FROM interview_cases WHERE id=?",
+                (case_id,),
+            ).fetchone()
+        if row is None:
+            raise ResourceNotFound("Interview case not found")
+        return row["refined_flow_status"] or row["status"]
+
+    def _snapshot_manifest(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "schemaVersion": "ai-task-manifest.v2",
+            "interviewCaseId": snapshot["interviewCaseId"],
+            "assessmentSnapshotId": snapshot["id"],
+            "questionSetId": snapshot["questionSetId"],
+            "snapshotVersion": snapshot["versionNo"],
+            "workbookSha256": snapshot["workbookSha256"],
+            "documents": snapshot["documentManifest"],
+            "questions": [
+                {
+                    "id": question["questionId"],
+                    "displayOrder": question["displayOrder"],
+                    "contentHash": hashlib.sha256(
+                        question["questionText"].encode("utf-8")
+                    ).hexdigest(),
+                }
+                for question in snapshot["questions"]
+            ],
+            "answers": [
+                {
+                    "id": answer["answerId"],
+                    "questionId": answer["questionId"],
+                    "isAnswered": answer["isAnswered"],
+                    "contentHash": answer["contentHash"],
+                }
+                for answer in snapshot["answers"]
+            ],
+            "redactionPolicy": "SANITIZED_TEXT_ONLY",
+        }
+
+    def _snapshot_provider_payload(self, task: dict[str, Any]) -> dict[str, Any]:
+        case_id = task["interviewCaseId"]
+        snapshot_id = task["assessmentSnapshotId"]
+        snapshot = self.snapshots.get(snapshot_id)
+        manifest = task["inputManifest"]
+        if snapshot["interviewCaseId"] != case_id or snapshot["workbookSha256"] != manifest.get("workbookSha256"):
+            raise StateConflict("Evaluation snapshot no longer matches")
+        with self.database.connection() as connection:
+            header = connection.execute(
+                """SELECT c.candidate_code, c.full_name, j.position_title, j.target_level
+                   FROM interview_cases ic
+                   JOIN candidates c ON c.id=ic.candidate_id
+                   JOIN jobs j ON j.id=ic.job_id WHERE ic.id=?""",
+                (case_id,),
+            ).fetchone()
+            documents = []
+            for reference in snapshot["documentManifest"]:
+                row = connection.execute(
+                    """SELECT document_type, id, version_no, extracted_text, content_sha256
+                       FROM documents WHERE id=? AND interview_case_id=? AND is_ai_eligible=1""",
+                    (reference.get("id"), case_id),
+                ).fetchone()
+                if (
+                    row is None
+                    or row["document_type"] != reference.get("document_type")
+                    or row["version_no"] != reference.get("version_no")
+                    or row["content_sha256"] != reference.get("content_sha256")
+                ):
+                    raise StateConflict("Evaluation document snapshot no longer matches")
+                documents.append(row)
+        if header is None:
+            raise ResourceNotFound("Interview case not found")
+        known_names = (header["full_name"],)
+        return {
+            "schemaVersion": "ai.input.v2",
+            "operation": "EVALUATE_ASSESSMENT",
+            "candidate": {"candidateCode": header["candidate_code"]},
+            "job": {"positionTitle": header["position_title"], "targetLevel": header["target_level"]},
+            "documents": [
+                {
+                    "documentType": row["document_type"],
+                    "documentId": row["id"],
+                    "versionNo": row["version_no"],
+                    "sanitizedText": sanitize_text(row["extracted_text"], known_names=known_names),
+                    "contentSha256": row["content_sha256"],
+                }
+                for row in documents
+            ],
+            "questionSetId": snapshot["questionSetId"],
+            "assessmentSnapshotId": snapshot_id,
+            "questions": [
+                {
+                    "questionId": question["questionId"],
+                    "displayOrder": question["displayOrder"],
+                    "questionText": sanitize_text(question["questionText"], known_names=known_names),
+                    "competencyKey": sanitize_text(question["competencyKey"], known_names=known_names),
+                    "expectedEvidence": sanitize_text(question["expectedEvidence"], known_names=known_names),
+                    "rubric": {
+                        key: sanitize_text(value, known_names=known_names)
+                        for key, value in question["rubric"].items()
+                    },
+                }
+                for question in snapshot["questions"]
+            ],
+            "answers": [
+                {
+                    "answerId": answer["answerId"],
+                    "questionId": answer["questionId"],
+                    "answerText": sanitize_text(answer["answerText"], known_names=known_names),
+                    "isAnswered": answer["isAnswered"],
+                    "assessmentStatus": answer["assessmentStatus"],
+                }
+                for answer in snapshot["answers"]
             ],
         }
 

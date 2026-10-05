@@ -3,6 +3,7 @@ from pathlib import Path
 
 from tests.ai_fixtures import (
     answer_evaluation_payload,
+    answer_evaluation_v2_payload,
     follow_up_payload,
     question_generation_payload,
 )
@@ -46,6 +47,16 @@ class AISchemaTests(unittest.TestCase):
                 "FOLLOW_UP", follow_up_payload(),
                 context={"askedQuestions": ["Explain the trade-off"]},
             )
+
+    def test_v2_evaluation_excludes_live_interview_fields_and_keeps_v1_readable(self):
+        from app.domain.errors import ValidationError
+
+        self.registry.validate("ANSWER_EVALUATION", answer_evaluation_payload())
+        self.registry.validate("ANSWER_EVALUATION", answer_evaluation_v2_payload())
+        invalid = answer_evaluation_v2_payload()
+        invalid["interviewBrief"] = {}
+        with self.assertRaises(ValidationError):
+            self.registry.validate("ANSWER_EVALUATION", invalid)
 
     def test_prompt_catalog_wraps_untrusted_payload_without_executing_it(self):
         from app.ai.prompts import PromptCatalog

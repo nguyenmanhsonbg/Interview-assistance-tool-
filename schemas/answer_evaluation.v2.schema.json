@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://clawcv.local/schemas/answer_evaluation.v2.json",
+  "title": "Answer Evaluation Output v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "operation", "perAnswerEvaluations", "competencyEvaluations", "strengths", "gaps", "conflicts", "risks", "confidence", "limitations"],
+  "properties": {
+    "schemaVersion": { "const": "answer-evaluation.v2" },
+    "operation": { "const": "ANSWER_EVALUATION" },
+    "perAnswerEvaluations": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["answerId", "questionId", "score", "evidenceStatus", "reasoning", "evidenceFound", "concerns", "cvConsistency"],
+        "properties": {
+          "answerId": { "type": "string", "minLength": 1 },
+          "questionId": { "type": "string", "minLength": 1 },
+          "score": { "type": ["integer", "null"], "minimum": 0, "maximum": 4 },
+          "evidenceStatus": { "enum": ["VERIFIED", "PARTIALLY_VERIFIED", "UNVERIFIED", "CONFLICTING", "NOT_MET", "NOT_ASSESSED"] },
+          "reasoning": { "type": "string", "minLength": 1, "maxLength": 3000 },
+          "evidenceFound": { "type": "array", "items": { "type": "string", "maxLength": 2000 }, "maxItems": 20 },
+          "concerns": { "type": "array", "items": { "type": "string", "maxLength": 2000 }, "maxItems": 20 },
+          "cvConsistency": { "enum": ["CONSISTENT", "PARTIALLY_CONSISTENT", "CONFLICTING", "NOT_ASSESSED"] }
+        }
+      }
+    },
+    "competencyEvaluations": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["competencyKey", "summary", "evidenceStatus", "confidence"],
+        "properties": {
+          "competencyKey": { "type": "string", "minLength": 1 },
+          "summary": { "type": "string", "minLength": 1, "maxLength": 3000 },
+          "evidenceStatus": { "enum": ["VERIFIED", "PARTIALLY_VERIFIED", "UNVERIFIED", "CONFLICTING", "NOT_MET", "NOT_ASSESSED"] },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "strengths": { "type": "array", "items": { "type": "string", "maxLength": 2000 }, "maxItems": 30 },
+    "gaps": { "type": "array", "items": { "type": "string", "maxLength": 2000 }, "maxItems": 30 },
+    "conflicts": { "type": "array", "items": { "type": "string", "maxLength": 2000 }, "maxItems": 30 },
+    "risks": { "type": "array", "items": { "type": "string", "maxLength": 2000 }, "maxItems": 30 },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "limitations": { "type": "array", "items": { "type": "string", "maxLength": 2000 }, "maxItems": 20 }
+  }
+}
