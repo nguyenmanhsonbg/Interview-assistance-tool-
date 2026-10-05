@@ -9,6 +9,7 @@ class Response:
     status: int
     body: dict[str, Any] | None
     headers: dict[str, str] = field(default_factory=dict)
+    raw_body: bytes | None = None
 
 
 def success_response(

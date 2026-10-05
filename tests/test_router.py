@@ -51,6 +51,19 @@ class RouterContractTests(unittest.TestCase):
         self.assertEqual("VALIDATION_ERROR", failure.body["error"]["code"])
         self.assertNotIn("exception", failure.body["error"])
 
+    def test_route_declares_binary_body_mode_and_response_can_carry_bytes(self):
+        from app.responses import Response
+        from app.router import Router
+
+        router = Router()
+        router.add(
+            "POST", r"/api/v1/binary", lambda request: Response(
+                status=200, body=None, raw_body=request.raw_body
+            ), body_mode="binary",
+        )
+        route, _ = router.match("POST", "/api/v1/binary")
+        self.assertEqual("binary", route.body_mode)
+
 
 if __name__ == "__main__":
     unittest.main()

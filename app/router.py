@@ -23,6 +23,7 @@ class Request:
     headers: Mapping[str, str] = field(default_factory=dict)
     query: Mapping[str, list[str]] = field(default_factory=dict)
     json_body: Any = None
+    raw_body: bytes | None = None
     path_params: dict[str, str] = field(default_factory=dict)
     context: dict[str, Any] = field(default_factory=dict)
 
@@ -37,6 +38,7 @@ class Route:
     handler: Handler
     access_mode: str = "LOCALHOST"
     max_body: int | None = None
+    body_mode: str = "json"
 
 
 class Router:
@@ -51,10 +53,13 @@ class Router:
         *,
         access_mode: str = "LOCALHOST",
         max_body: int | None = None,
+        body_mode: str = "json",
     ) -> None:
+        if body_mode not in {"json", "binary", "none"}:
+            raise ValueError("Unsupported route body mode")
         compiled = re.compile(f"^(?:{pattern})$")
         self._routes.append(
-            Route(method.upper(), compiled, handler, access_mode, max_body)
+            Route(method.upper(), compiled, handler, access_mode, max_body, body_mode)
         )
 
     def match(self, method: str, path: str) -> tuple[Route, dict[str, str]]:

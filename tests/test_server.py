@@ -11,6 +11,7 @@ class ServerSmokeTests(unittest.TestCase):
     def setUp(self):
         from app.config import AppConfig
         from app.responses import success_response
+        from app.responses import Response
         from app.router import Router
         from app.server import create_server
 
@@ -29,6 +30,13 @@ class ServerSmokeTests(unittest.TestCase):
             "POST",
             r"/api/v1/test-json",
             lambda request: success_response(request.json_body, request.request_id),
+        )
+        router.add(
+            "POST",
+            r"/api/v1/test-binary",
+            lambda request: Response(status=200, body=None, raw_body=request.raw_body),
+            body_mode="binary",
+            max_body=256,
         )
         self.server = create_server(self.config, router=router)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -104,6 +112,25 @@ class ServerSmokeTests(unittest.TestCase):
         self.assertEqual("RESOURCE_NOT_FOUND", json.loads(missing_body)["error"]["code"])
         self.assertEqual(405, method_status)
         self.assertEqual("METHOD_NOT_ALLOWED", json.loads(method_body)["error"]["code"])
+
+    def test_binary_body_and_response_are_not_decoded_as_json(self):
+        status, headers, body = self.request(
+            "/api/v1/test-binary",
+            method="POST",
+            body=b"PK\x03\x04workbook",
+            headers={"Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+        )
+        self.assertEqual(200, status)
+        self.assertEqual(b"PK\x03\x04workbook", body)
+        self.assertEqual("application/octet-stream", headers["Content-Type"])
+        too_large, _, error = self.request(
+            "/api/v1/test-binary",
+            method="POST",
+            body=b"x" * 257,
+            headers={"Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+        )
+        self.assertEqual(413, too_large)
+        self.assertEqual("REQUEST_TOO_LARGE", json.loads(error)["error"]["code"])
 
 
 if __name__ == "__main__":

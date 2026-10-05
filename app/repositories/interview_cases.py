@@ -97,6 +97,7 @@ def _case_dict(row: sqlite3.Row, members: list[sqlite3.Row]) -> dict[str, Any]:
         "candidateId": row["candidate_id"],
         "jobId": row["job_id"],
         "status": row["status"],
+        "refinedFlowStatus": row["refined_flow_status"] or row["status"],
         "scheduledAt": row["scheduled_at"],
         "assessmentDurationSeconds": row["assessment_duration_seconds"],
         "allowIncompleteSubmit": bool(row["allow_incomplete_submit"]),

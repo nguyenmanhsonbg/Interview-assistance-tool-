@@ -169,8 +169,12 @@ def _handler_factory(
                 self._write_json(_domain_error_response(error, request_id), request_id)
                 return
 
-            body, failure = self._read_json_body(
-                request_id, route.max_body or config.max_json_body
+            body, raw_body, failure = self._read_request_body(
+                request_id,
+                route.max_body if route.max_body is not None else (
+                    config.max_upload_body if route.body_mode == "binary" else config.max_json_body
+                ),
+                route.body_mode,
             )
             if failure is not None:
                 self._write_json(failure, request_id)
@@ -182,6 +186,7 @@ def _handler_factory(
                 headers=self.headers,
                 query=parse_qs(parsed.query, keep_blank_values=True),
                 json_body=body,
+                raw_body=raw_body,
                 path_params=path_params,
                 context=security_context,
             )
@@ -215,35 +220,46 @@ def _handler_factory(
             if referer and not any(referer.lower().startswith(value + "/") for value in allowed):
                 raise ForbiddenCapability("Cross-origin mutation is not allowed")
 
-        def _read_json_body(
-            self, request_id: str, maximum: int
-        ) -> tuple[Any, Response | None]:
+        def _read_request_body(
+            self, request_id: str, maximum: int, body_mode: str
+        ) -> tuple[Any, bytes | None, Response | None]:
             raw_length = self.headers.get("Content-Length")
             if raw_length is None or raw_length == "0":
-                return None, None
+                return None, b"" if body_mode == "binary" else None, None
             try:
                 length = int(raw_length)
             except ValueError:
-                return None, error_response(
+                return None, None, error_response(
                     "INVALID_JSON", "Invalid request body", request_id, status=400
                 )
             if length < 0 or length > maximum:
-                return None, error_response(
+                return None, None, error_response(
                     "REQUEST_TOO_LARGE", "Request body is too large", request_id, status=413
                 )
+            raw = self.rfile.read(length)
+            if body_mode == "none":
+                return None, None, error_response(
+                    "INVALID_REQUEST", "Request body is not allowed", request_id, status=400
+                )
+            if body_mode == "binary":
+                if self.headers.get("Content-Type", "").split(";", 1)[0].strip() == "application/json":
+                    return None, None, error_response(
+                        "UNSUPPORTED_MEDIA_TYPE", "Binary request body is required", request_id, status=415
+                    )
+                return None, raw, None
             content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip()
             if content_type != "application/json":
-                return None, error_response(
+                return None, None, error_response(
                     "UNSUPPORTED_MEDIA_TYPE",
                     "Content-Type must be application/json",
                     request_id,
                     status=415,
                 )
             try:
-                decoded = self.rfile.read(length).decode("utf-8")
-                return json.loads(decoded), None
+                decoded = raw.decode("utf-8")
+                return json.loads(decoded), None, None
             except (UnicodeDecodeError, json.JSONDecodeError):
-                return None, error_response(
+                return None, None, error_response(
                     "INVALID_JSON", "Invalid JSON body", request_id, status=400
                 )
 
@@ -266,6 +282,9 @@ def _handler_factory(
             self.wfile.write(content)
 
         def _write_json(self, response: Response, request_id: str) -> None:
+            if response.raw_body is not None:
+                self._write_raw(response, request_id)
+                return
             payload = b"" if response.body is None else json.dumps(
                 response.body, ensure_ascii=False, separators=(",", ":")
             ).encode("utf-8")
@@ -277,6 +296,24 @@ def _handler_factory(
                 self.send_header(name, value)
             for name, value in response.headers.items():
                 self.send_header(name, value)
+            self.end_headers()
+            if payload:
+                self.wfile.write(payload)
+
+        def _write_raw(self, response: Response, request_id: str) -> None:
+            payload = response.raw_body or b""
+            self.send_response(response.status)
+            self.send_header(
+                "Content-Type",
+                response.headers.get("Content-Type", "application/octet-stream"),
+            )
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("X-Request-Id", request_id)
+            for name, value in SECURITY_HEADERS.items():
+                self.send_header(name, value)
+            for name, value in response.headers.items():
+                if name.lower() != "content-type":
+                    self.send_header(name, value)
             self.end_headers()
             if payload:
                 self.wfile.write(payload)

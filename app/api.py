@@ -16,6 +16,7 @@ from app.services.assessment_service import AssessmentService
 from app.services.backup_service import BackupService
 from app.services.case_service import CaseService
 from app.services.document_service import DocumentService
+from app.services.excel_assessment_service import ExcelAssessmentService
 from app.services.evaluation_service import EvaluationService
 from app.services.interview_brief_service import InterviewBriefService
 from app.services.interview_service import InterviewService
@@ -40,6 +41,7 @@ class APIController:
         self.submit_task = submit_task
         self.cases = CaseService(database)
         self.documents = DocumentService(database, data_root)
+        self.excel_assessments = ExcelAssessmentService(database)
         self.questions = QuestionService(database)
         self.question_generation = QuestionGenerationService(
             database,
@@ -66,7 +68,6 @@ class APIController:
 
     def register(self, router: Router) -> None:
         committee = {"access_mode": "COMMITTEE"}
-        candidate = {"access_mode": "CANDIDATE"}
         router.add("POST", r"/api/v1/auth/committee-session", self.authenticate, access_mode="STARTUP")
         router.add("POST", r"/api/v1/auth/committee-pin", self.setup_pin, access_mode="STARTUP")
         router.add("POST", r"/api/v1/auth/lock", self.lock, **committee)
@@ -85,24 +86,12 @@ class APIController:
         router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set", self.generate_question_set, **committee)
         router.add("PATCH", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set", self.update_question_set, **committee)
         router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set/approve", self.approve_question_set, **committee)
-        router.add("GET", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/assessment", self.get_assessment, **committee)
-        router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/assessment", self.prepare_assessment, **committee)
-        router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/assessment/start", self.start_assessment, **committee)
-        router.add("GET", r"/api/v1/assessment-attempts/(?P<attempt_id>[^/]+)/questions", self.candidate_questions, **candidate)
-        router.add("PUT", r"/api/v1/assessment-attempts/(?P<attempt_id>[^/]+)/answers/(?P<question_id>[^/]+)", self.save_answer, **candidate)
-        router.add("POST", r"/api/v1/assessment-attempts/(?P<attempt_id>[^/]+)/submit", self.submit_assessment, **candidate)
+        router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set/export", self.export_question_set, body_mode="none", **committee)
+        router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/assessment-snapshots/import", self.import_assessment_snapshot, max_body=10 * 1024 * 1024, body_mode="binary", **committee)
         router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/ai/evaluate", self.evaluate_assessment, **committee)
+        router.add("GET", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/ai/evaluation", self.get_ai_evaluation, **committee)
+        router.add("GET", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/assessment-snapshots/(?P<snapshot_id>[^/]+)", self.get_assessment_snapshot, **committee)
         router.add("GET", r"/api/v1/tasks/(?P<task_id>[^/]+)", self.get_task, **committee)
-        router.add("GET", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/interview-brief", self.get_brief, **committee)
-        router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/interview-brief", self.create_brief, **committee)
-        router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/live-interview/start", self.start_live, **committee)
-        router.add("GET", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/live-interview/records", self.list_live_records, **committee)
-        router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/live-interview/records", self.record_live, **committee)
-        router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/live-interview/follow-up", self.follow_up, **committee)
-        router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/live-interview/complete", self.complete_live, **committee)
-        router.add("GET", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/final-evaluation", self.get_final_evaluation, **committee)
-        router.add("PUT", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/final-evaluation", self.save_final_evaluation, **committee)
-        router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/final-evaluation/finalize", self.finalize_evaluation, **committee)
         router.add("GET", r"/api/v1/settings", self.get_settings, **committee)
         router.add("PATCH", r"/api/v1/settings", self.update_settings, **committee)
         router.add("POST", r"/api/v1/backups", self.create_backup, **committee)
@@ -225,6 +214,26 @@ class APIController:
             raise ValidationError("Explicit approval confirmation is required")
         return _ok(request, {"questionSet": self.questions.approve(body.get("questionSetId"), body.get("memberId")), "caseStatus": "QUESTIONS_APPROVED"})
 
+    def export_question_set(self, request: Request) -> Response:
+        exported = self.excel_assessments.export_question_set(request.path_params["case_id"])
+        return Response(
+            status=200,
+            body=None,
+            raw_body=exported.content,
+            headers={
+                "Content-Type": exported.content_type,
+                "Content-Disposition": f'attachment; filename="{exported.filename}"',
+            },
+        )
+
+    def import_assessment_snapshot(self, request: Request) -> Response:
+        snapshot = self.excel_assessments.import_answers(
+            request.path_params["case_id"],
+            request.raw_body or b"",
+            idempotency_key=_idempotency(request, "excel-import"),
+        )
+        return _ok(request, {"snapshot": snapshot}, status=201)
+
     def get_assessment(self, request: Request) -> Response:
         return _ok(request, {"attempt": self.assessments.get_for_case(request.path_params["case_id"])})
 
@@ -263,18 +272,31 @@ class APIController:
 
     def evaluate_assessment(self, request: Request) -> Response:
         body = _body(request)
-        task = self.evaluations.request(request.path_params["case_id"], body.get("attemptId"), idempotency_key=_idempotency(request, "evaluation"), force_rerun=body.get("forceRerun") is True)
+        snapshot_id = body.get("snapshotId")
+        if not isinstance(snapshot_id, str) or not snapshot_id.strip():
+            raise ValidationError("snapshotId is required")
+        task = self.evaluations.request_snapshot(request.path_params["case_id"], snapshot_id, idempotency_key=_idempotency(request, "evaluation"), force_rerun=body.get("forceRerun") is True)
         self.submit_task(task["id"])
         return _ok(request, {"taskId": task["id"], "status": task["status"], "caseStatus": "AI_ANALYZING"}, status=202)
+
+    def get_ai_evaluation(self, request: Request) -> Response:
+        return _ok(request, {"result": self.evaluations.current_ai_result(request.path_params["case_id"])})
+
+    def get_assessment_snapshot(self, request: Request) -> Response:
+        return _ok(request, {"snapshot": self.excel_assessments.get_snapshot(request.path_params["case_id"], request.path_params["snapshot_id"])})
 
     def get_task(self, request: Request) -> Response:
         task = self.tasks.get(request.path_params["task_id"])
         result = task.pop("result", None)
-        safe_task = {key: task[key] for key in ("id", "taskType", "status", "createdAt", "startedAt", "finishedAt", "errorCode")}
+        safe_task = {key: task[key] for key in ("id", "taskType", "status", "assessmentSnapshotId", "createdAt", "startedAt", "finishedAt", "errorCode")}
         if safe_task["status"] == "COMPLETED" and safe_task["errorCode"] == "AI_MATERIALIZATION_FAILED":
             safe_task["status"] = "FAILED"
         if safe_task["status"] == "COMPLETED":
-            case_status = self.cases.get_case(task["interviewCaseId"])["status"]
+            case_status = (
+                self.evaluations.refined_status(task["interviewCaseId"])
+                if task.get("assessmentSnapshotId")
+                else self.cases.get_case(task["interviewCaseId"])["status"]
+            )
             materializing = (
                 task["taskType"] == "GENERATE_QUESTIONS" and case_status == "QUESTIONS_GENERATING"
             ) or (

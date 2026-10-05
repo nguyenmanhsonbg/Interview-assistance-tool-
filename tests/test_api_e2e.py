@@ -7,7 +7,11 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from tests.ai_fixtures import answer_evaluation_payload, follow_up_payload, question_generation_payload
+from app.infrastructure.excel_question_answer import (
+    export_question_answer_workbook,
+    import_question_answer_workbook,
+)
+from tests.ai_fixtures import answer_evaluation_v2_payload, question_generation_payload
 
 
 class FakePilotProvider:
@@ -15,10 +19,10 @@ class FakePilotProvider:
         return question_generation_payload()
 
     def evaluate_answers(self, payload):
-        return answer_evaluation_payload(answered=True)
+        return answer_evaluation_v2_payload(answered=True)
 
     def suggest_follow_up(self, payload):
-        return follow_up_payload()
+        return {"schemaVersion": "follow-up.v1", "operation": "FOLLOW_UP", "questions": [], "stopCondition": "none", "confidence": 0.5, "limitations": []}
 
 
 class PilotE2ETests(unittest.TestCase):
@@ -69,6 +73,16 @@ class PilotE2ETests(unittest.TestCase):
             raise AssertionError(f"{method} {path} -> {error.code}: {error.read()!r}") from error
         return None if payload is None else payload["data"]
 
+    def call_binary(self, method, path, body=None, headers=None):
+        request = urllib.request.Request(
+            self.base + path, method=method, data=body, headers=headers or {}
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=3) as response:
+                return response.status, dict(response.headers), response.read()
+        except urllib.error.HTTPError as error:
+            raise AssertionError(f"{method} {path} -> {error.code}: {error.read()!r}") from error
+
     def committee_headers(self, mutation=True):
         headers = {"X-Committee-Session": self.session}
         if mutation:
@@ -99,19 +113,18 @@ class PilotE2ETests(unittest.TestCase):
             time.sleep(0.02)
         self.fail("AI task did not complete")
 
-    def test_complete_pilot_workflow_over_http(self):
+    def test_complete_excel_question_answer_evaluation_flow_over_http(self):
         headers = self.committee_headers()
         job = self.call("POST", "/api/v1/jobs", {
-            "jobCode": "JOB-E2E", "positionTitle": "Backend Engineer", "targetLevel": "Senior",
+            "jobCode": "JOB-EXCEL", "positionTitle": "Backend Engineer", "targetLevel": "Senior",
         }, headers=headers)["job"]
         candidate = self.call("POST", "/api/v1/candidates", {
-            "candidateCode": "CAND-E2E", "fullName": "Pilot Candidate",
+            "candidateCode": "CAND-EXCEL", "fullName": "Pilot Candidate",
         }, headers=headers)["candidate"]
         case = self.call("POST", "/api/v1/interview-cases", {
             "candidateId": candidate["id"], "jobId": job["id"],
             "committeeMembers": [{"displayName": "Lead", "role": "LEAD"}],
         }, headers=headers)["case"]
-        member_id = case["committeeMembers"][0]["id"]
 
         for document_type, text in (("JD", "Build reliable backend systems"), ("CV", "Built Python services")):
             document = self.call(
@@ -133,115 +146,51 @@ class PilotE2ETests(unittest.TestCase):
             "GET", f"/api/v1/interview-cases/{case['id']}/question-set",
             headers=self.committee_headers(False),
         )["questionSet"]
-        self.call(
-            "POST", f"/api/v1/interview-cases/{case['id']}/question-set/approve",
-            {"questionSetId": question_set["id"], "memberId": member_id,
-             "confirmation": "APPROVE_QUESTION_SET"}, headers=headers,
+
+        export_status, export_headers, exported_bytes = self.call_binary(
+            "POST", f"/api/v1/interview-cases/{case['id']}/question-set/export",
+            headers=headers,
         )
-        attempt = self.call(
-            "POST", f"/api/v1/interview-cases/{case['id']}/assessment",
-            {"questionSetId": question_set["id"]}, headers=headers,
-        )["attempt"]
-        started = self.call(
-            "POST", f"/api/v1/interview-cases/{case['id']}/assessment/start",
-            {"candidateCodeConfirmed": True, "committeePinVerified": True}, headers=headers,
-        )["attempt"]
-        self.assertEqual(
-            401,
-            self.error_status(
-                "GET", "/api/v1/interview-cases",
-                headers={"X-Committee-Session": self.session},
-            ),
-        )
-        candidate_headers = {
-            "X-Startup-Token": self.startup,
-            "X-Candidate-Token": started["candidateToken"],
-            "X-Idempotency-Key": "e2e-submit-once",
-        }
-        candidate_view = self.call(
-            "GET", f"/api/v1/assessment-attempts/{attempt['id']}/questions",
-            headers={"X-Candidate-Token": started["candidateToken"]},
-        )
-        first_question = candidate_view["questions"][0]
-        self.call(
-            "PUT", f"/api/v1/assessment-attempts/{attempt['id']}/answers/{first_question['id']}",
-            {"text": "A concrete answer", "isAnswered": True, "clientRevision": 1},
-            headers=candidate_headers,
-        )
-        submit_body = {
-            "confirmation": "SUBMIT_ASSESSMENT",
-            "answerRevisions": {
-                question["id"]: 1 if question["id"] == first_question["id"] else 0
-                for question in candidate_view["questions"]
+        self.assertEqual(200, export_status)
+        self.assertIn("spreadsheetml.sheet", export_headers["Content-Type"])
+        workbook = import_question_answer_workbook(exported_bytes)
+        workbook.questions[0]["answerText"] = "A concrete answer from Excel"
+        workbook.questions[0]["isAnswered"] = True
+        completed_workbook = export_question_answer_workbook(workbook.metadata, workbook.questions)
+
+        imported = self.call_binary(
+            "POST", f"/api/v1/interview-cases/{case['id']}/assessment-snapshots/import",
+            body=completed_workbook,
+            headers={
+                **headers,
+                "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "X-Idempotency-Key": "excel-http-import-1",
             },
-        }
-        first_submit = self.call(
-            "POST", f"/api/v1/assessment-attempts/{attempt['id']}/submit",
-            submit_body, headers=candidate_headers,
         )
-        replayed_submit = self.call(
-            "POST", f"/api/v1/assessment-attempts/{attempt['id']}/submit",
-            submit_body, headers=candidate_headers,
-        )
-        self.assertEqual(
-            first_submit["attempt"]["submittedAt"],
-            replayed_submit["attempt"]["submittedAt"],
-        )
-        self.assertEqual(
-            401,
-            self.error_status(
-                "GET", f"/api/v1/assessment-attempts/{attempt['id']}/questions",
-                headers={"X-Candidate-Token": started["candidateToken"]},
-            ),
-        )
-        auth = self.call(
-            "POST", "/api/v1/auth/committee-session", {"pin": "246810"},
-            headers={"X-Startup-Token": self.startup},
-        )
-        self.session = auth["committeeSession"]
-        headers = self.committee_headers()
+        snapshot_response = json.loads(imported[2])["data"]["snapshot"]
+        self.assertEqual(question_set["id"], snapshot_response["questionSetId"])
+        snapshot_id = snapshot_response["id"]
+        snapshot = self.call(
+            "GET", f"/api/v1/interview-cases/{case['id']}/assessment-snapshots/{snapshot_id}",
+            headers=self.committee_headers(False),
+        )["snapshot"]
+        self.assertEqual("ANSWERS_IMPORTED", snapshot["refinedFlowStatus"])
+
         evaluation_task = self.call(
             "POST", f"/api/v1/interview-cases/{case['id']}/ai/evaluate",
-            {"attemptId": attempt["id"]}, headers=headers,
+            {"snapshotId": snapshot_id}, headers=headers,
         )
         self.wait_task(evaluation_task["taskId"])
-
-        brief = self.call(
+        result = self.call(
+            "GET", f"/api/v1/interview-cases/{case['id']}/ai/evaluation",
+            headers=self.committee_headers(False),
+        )["result"]
+        self.assertEqual("answer-evaluation.v2", result["payload"]["schemaVersion"])
+        self.assertNotIn("interviewBrief", result["payload"])
+        self.assertEqual(404, self.error_status(
             "GET", f"/api/v1/interview-cases/{case['id']}/interview-brief",
             headers=self.committee_headers(False),
-        )["brief"]
-        self.call(
-            "POST", f"/api/v1/interview-cases/{case['id']}/live-interview/start",
-            {"memberId": member_id}, headers=headers,
-        )
-        for sequence in range(1, 4):
-            self.call(
-                "POST", f"/api/v1/interview-cases/{case['id']}/live-interview/records",
-                {"sequenceNo": sequence, "committeeMemberId": member_id,
-                 "askedStatus": "ASKED", "liveNotes": f"Evidence {sequence}",
-                 "score": 3, "evidenceStatus": "VERIFIED"}, headers=headers,
-            )
-        self.call(
-            "POST", f"/api/v1/interview-cases/{case['id']}/live-interview/complete",
-            {"memberId": member_id, "reason": "AGENDA_COMPLETE"}, headers=headers,
-        )
-        draft = self.call(
-            "PUT", f"/api/v1/interview-cases/{case['id']}/final-evaluation",
-            {"finalResult": "PASS", "summary": "Committee-owned decision",
-             "strengths": [], "gaps": [], "risks": []}, headers=headers,
-        )["evaluation"]
-        final = self.call(
-            "POST", f"/api/v1/interview-cases/{case['id']}/final-evaluation/finalize",
-            {"evaluationId": draft["id"], "memberId": member_id,
-             "confirmation": "FINALIZE_EVALUATION"}, headers=headers,
-        )["evaluation"]
-        self.assertEqual("FINAL", final["status"])
-        overview = self.call(
-            "GET", f"/api/v1/interview-cases/{case['id']}",
-            headers=self.committee_headers(False),
-        )["case"]
-        self.assertEqual("EVALUATED", overview["status"])
-        self.assertEqual(brief["id"], overview["currentBriefId"])
+        ))
 
 
 if __name__ == "__main__":
