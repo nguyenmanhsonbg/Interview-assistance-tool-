@@ -175,6 +175,11 @@ class PilotE2ETests(unittest.TestCase):
             headers=self.committee_headers(False),
         )["snapshot"]
         self.assertEqual("ANSWERS_IMPORTED", snapshot["refinedFlowStatus"])
+        current_snapshot = self.call(
+            "GET", f"/api/v1/interview-cases/{case['id']}/assessment-snapshots/current",
+            headers=self.committee_headers(False),
+        )["snapshot"]
+        self.assertEqual(snapshot_id, current_snapshot["id"])
 
         evaluation_task = self.call(
             "POST", f"/api/v1/interview-cases/{case['id']}/ai/evaluate",

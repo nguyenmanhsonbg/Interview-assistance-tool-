@@ -90,6 +90,7 @@ class APIController:
         router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/assessment-snapshots/import", self.import_assessment_snapshot, max_body=10 * 1024 * 1024, body_mode="binary", **committee)
         router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/ai/evaluate", self.evaluate_assessment, **committee)
         router.add("GET", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/ai/evaluation", self.get_ai_evaluation, **committee)
+        router.add("GET", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/assessment-snapshots/current", self.get_assessment_snapshot, **committee)
         router.add("GET", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/assessment-snapshots/(?P<snapshot_id>[^/]+)", self.get_assessment_snapshot, **committee)
         router.add("GET", r"/api/v1/tasks/(?P<task_id>[^/]+)", self.get_task, **committee)
         router.add("GET", r"/api/v1/settings", self.get_settings, **committee)
@@ -283,7 +284,12 @@ class APIController:
         return _ok(request, {"result": self.evaluations.current_ai_result(request.path_params["case_id"])})
 
     def get_assessment_snapshot(self, request: Request) -> Response:
-        return _ok(request, {"snapshot": self.excel_assessments.get_snapshot(request.path_params["case_id"], request.path_params["snapshot_id"])})
+        return _ok(
+            request,
+            {"snapshot": self.excel_assessments.get_snapshot(
+                request.path_params["case_id"], request.path_params.get("snapshot_id")
+            )},
+        )
 
     def get_task(self, request: Request) -> Response:
         task = self.tasks.get(request.path_params["task_id"])
