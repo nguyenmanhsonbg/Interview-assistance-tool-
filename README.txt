@@ -35,3 +35,21 @@ confirmed text is sent. Raw files, base64 content, PINs, tokens and API keys
 are not sent to the provider or written to logs. Verify model availability and
 the account data policy before a pilot. Without AI_PROVIDER=gemini, the
 generic provider configuration remains the default.
+
+Active Excel assessment flow
+----------------------------
+The current Committee flow is:
+  1. Create a case and enter/confirm JD and CV text.
+  2. Generate or manually create the question set.
+  3. Review/approve questions and export the canonical question-answer.v1 .xlsx workbook.
+  4. Fill the answer cells in that workbook and import the same .xlsx file.
+  5. Start AI evaluation and review the read-only answer-evaluation.v2 result.
+
+Only .xlsx files exported by the tool are accepted. The backend validates the
+metadata, question rows, rubric, answer flags and file limits. Blank answers
+are NOT_ASSESSED. Imported snapshots are immutable; a changed workbook creates
+a new version. Raw workbook bytes are not sent to Gemini or written to logs.
+
+Candidate Mode, Interview Brief, live interview and Final Evaluation are not
+active in this refined UI. Existing historical data is retained for recovery.
+AI output is advisory evidence only; it does not make a hiring decision.

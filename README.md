@@ -93,3 +93,17 @@ Máy pilot không cần cài Python, Node.js, Docker hoặc database server.
 - Không có account doanh nghiệp/SSO, camera, microphone, coding judge hoặc tuyển dụng tự động.
 - AI không được chốt PASS/FAIL; chỉ Committee lead mới finalize.
 - External penetration test và browser automation là backlog trước production rộng.
+
+## Active Excel assessment flow
+
+The active Committee workflow is linear:
+
+1. Create an Interview Case and enter/confirm the JD and CV text.
+2. Generate questions with Gemini, or choose the manual question fallback.
+3. Review/approve the questions and export the canonical `question-answer.v1` `.xlsx` workbook.
+4. Fill the answer cells in that same workbook and import it from the Answers step. Blank answers remain `NOT_ASSESSED`.
+5. Start AI evaluation from the imported snapshot and review the read-only `answer-evaluation.v2` result.
+
+The workbook is validated on the backend. It must be `.xlsx`, must use the exported two-sheet format (`metadata` and `questions`), and is limited to 10 MB at the HTTP boundary. An imported snapshot is immutable; a changed workbook creates a new version. The raw workbook is never sent to Gemini or written to logs.
+
+The active UI no longer exposes Candidate Mode, Interview Brief, live interview, or Final Evaluation. Historical tables and old AI results remain readable for compatibility, but those routes are not registered in the refined flow. AI scores, strengths, gaps, conflicts, risks, and limitations are evidence for Committee review only; the tool does not make a hiring decision.
