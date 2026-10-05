@@ -346,6 +346,7 @@ async function renderEvaluation(caseId) {
   } catch (error) {
     if (error.status !== 404) throw error;
   }
+  if (result && result.assessmentSnapshotId !== snapshot.id) result = null;
   if (!result || snapshot.refinedFlowStatus === "ANSWERS_IMPORTED" || snapshot.refinedFlowStatus === "AI_ANALYSIS_FAILED") {
     section.append(button("Bắt đầu đánh giá bằng AI", async () => {
       const task = await apiFetch(`/api/v1/interview-cases/${caseId}/ai/evaluate`, {

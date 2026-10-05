@@ -18,6 +18,13 @@ class RefinedEvaluationProvider:
         return answer_evaluation_v2_payload()
 
 
+class FailedRefinedEvaluationProvider:
+    def evaluate_answers(self, payload):
+        from app.ai.provider import ProviderError
+
+        raise ProviderError("provider rejected request", code="AI_BAD_REQUEST", retryable=False)
+
+
 class RefinedEvaluationTests(MigratedDatabaseFixture, unittest.TestCase):
     def setUp(self):
         super().setUp()
@@ -78,6 +85,44 @@ class RefinedEvaluationTests(MigratedDatabaseFixture, unittest.TestCase):
         result = service.current_ai_result(self.case["id"])
         self.assertEqual("answer-evaluation.v2", result["payload"]["schemaVersion"])
         self.assertEqual(2, result["versionNo"])
+
+    def test_terminal_snapshot_failure_enters_refined_manual_fallback(self):
+        from app.services.evaluation_service import EvaluationService
+
+        service = EvaluationService(
+            self.database, Path(__file__).resolve().parents[1] / "schemas"
+        )
+        task = service.request_snapshot(
+            self.case["id"], self.snapshot["id"], idempotency_key="refined-evaluation-failure"
+        )
+        failed = service.process(task["id"], FailedRefinedEvaluationProvider())
+
+        self.assertEqual("FAILED", failed["status"])
+        self.assertEqual("AI_ANALYSIS_FAILED", service.refined_status(self.case["id"]))
+        current_snapshot = ExcelAssessmentService(self.database).get_snapshot(
+            self.case["id"], self.snapshot["id"]
+        )
+        self.assertEqual("AI_ANALYSIS_FAILED", current_snapshot["refinedFlowStatus"])
+
+    def test_interrupted_snapshot_task_recovery_enters_refined_manual_fallback(self):
+        from app.services.evaluation_service import EvaluationService
+
+        service = EvaluationService(
+            self.database, Path(__file__).resolve().parents[1] / "schemas"
+        )
+        task = service.request_snapshot(
+            self.case["id"], self.snapshot["id"], idempotency_key="refined-evaluation-recovery"
+        )
+        with self.database.transaction() as connection:
+            connection.execute(
+                "UPDATE ai_tasks SET status='RUNNING', retry_count=1, max_retry=1 WHERE id=?",
+                (task["id"],),
+            )
+
+        recovered = service.tasks.recover_interrupted()
+
+        self.assertEqual([task["id"]], recovered["failed"])
+        self.assertEqual("AI_ANALYSIS_FAILED", service.refined_status(self.case["id"]))
 
 
 if __name__ == "__main__":

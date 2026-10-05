@@ -114,7 +114,7 @@ class AITaskService:
         failed: list[str] = []
         with self.database.transaction() as connection:
             rows = connection.execute(
-                """SELECT id, interview_case_id, task_type, retry_count, max_retry
+                """SELECT id, interview_case_id, assessment_snapshot_id, task_type, retry_count, max_retry
                    FROM ai_tasks WHERE status='RUNNING'"""
             ).fetchall()
             for row in rows:
@@ -128,7 +128,7 @@ class AITaskService:
                     pending_retry.append(row["id"])
                 else:
                     connection.execute("UPDATE ai_tasks SET status='FAILED', error_code='AI_TASK_INTERRUPTED', error_message='Retry limit reached', finished_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?", (row["id"],))
-                    self._apply_terminal_failure(connection, row)
+                    self._apply_terminal_failure(connection, dict(row))
                     append_audit(
                         connection, actor_type="SYSTEM", action="AI_TASK_FAILED",
                         entity_type="AI_TASK", entity_id=row["id"],
@@ -158,6 +158,7 @@ class AITaskService:
                 {
                     "task_type": task["taskType"],
                     "interview_case_id": task["interviewCaseId"],
+                    "assessment_snapshot_id": task.get("assessmentSnapshotId"),
                 },
             )
             append_audit(
@@ -179,6 +180,7 @@ class AITaskService:
                     {
                         "task_type": task["taskType"],
                         "interview_case_id": task["interviewCaseId"],
+                        "assessment_snapshot_id": task.get("assessmentSnapshotId"),
                     },
                 )
             append_audit(
