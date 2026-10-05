@@ -9,9 +9,12 @@ class AppConfigTests(unittest.TestCase):
     def test_defaults_keep_generic_provider_and_hide_api_key(self):
         from app.config import AppConfig
 
-        with patch.dict(os.environ, {}, clear=True):
-            os.environ["LOCALAPPDATA"] = os.getcwd()
-            config = AppConfig.from_environment()
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch.dict(os.environ, {}, clear=True):
+                os.environ["LOCALAPPDATA"] = os.getcwd()
+                config = AppConfig.from_environment(
+                    env_file=Path(temporary) / ".env"
+                )
 
         self.assertEqual("generic", config.ai_provider)
         self.assertIsNone(config.ai_endpoint)
