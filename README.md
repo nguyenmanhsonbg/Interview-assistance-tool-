@@ -41,6 +41,18 @@ $env:GEMINI_CV_PARSE_TIMEOUT_MS = "45000"
 python main.py
 ```
 
+Hoặc tạo file `.env` ở thư mục gốc project với cùng các biến trên:
+
+```dotenv
+AI_PROVIDER=gemini
+GEMINI_API_KEY=your-gemini-api-key
+GEMINI_CV_PARSE_MODELS=gemini-3.6-flash,gemini-3.5-flash,gemini-3.5-flash-lite
+GEMINI_CV_PARSE_TIMEOUT_MS=45000
+```
+
+Biến môi trường của Windows luôn được ưu tiên hơn giá trị trong `.env`.
+File `.env` đã được git ignore; không commit file này chứa API key thật.
+
 Gemini được gọi qua REST `generateContent`. Ứng dụng xoay vòng các model khi
 gặp lỗi retryable, ghi provider/model vào metadata của AI task, và vẫn giữ
 manual fallback khi provider không khả dụng. Chỉ text đã được extract,

@@ -8,3 +8,4 @@ release/
 *.db-wal
 *.db-shm
 *.log
+.env

@@ -25,6 +25,10 @@ Set these environment variables before starting the portable app:
   GEMINI_CV_PARSE_MODELS=gemini-3.6-flash,gemini-3.5-flash,gemini-3.5-flash-lite
   GEMINI_CV_PARSE_TIMEOUT_MS=45000
 
+Alternatively, create a .env file in the project root with these values.
+Windows environment variables override values from .env. The .env file is
+ignored by Git; never commit a real API key.
+
 The app calls Gemini through generateContent, rotates configured models for
 retryable failures, and keeps the manual fallback. Only extracted, sanitized,
 confirmed text is sent. Raw files, base64 content, PINs, tokens and API keys

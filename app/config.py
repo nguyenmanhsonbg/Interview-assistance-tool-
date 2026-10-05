@@ -12,6 +12,29 @@ DEFAULT_GEMINI_MODELS = (
 )
 
 
+def _read_dotenv(path: Path) -> dict[str, str]:
+    if not path.is_file():
+        return {}
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8-sig").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or line.startswith(";"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        name, separator, value = line.partition("=")
+        name = name.strip()
+        if not separator or not name or not name.replace("_", "").isalnum():
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] in {"'", '"'} and value[-1] == value[0]:
+            value = value[1:-1]
+        elif " #" in value:
+            value = value.split(" #", 1)[0].rstrip()
+        values[name] = value
+    return values
+
+
 def _default_data_directory() -> Path:
     local_app_data = os.environ.get("LOCALAPPDATA")
     if local_app_data:
@@ -53,35 +76,44 @@ class AppConfig:
         object.__setattr__(self, "gemini_models", models or DEFAULT_GEMINI_MODELS)
 
     @classmethod
-    def from_environment(cls) -> "AppConfig":
+    def from_environment(cls, *, env_file: Path | None = None) -> "AppConfig":
+        dotenv = _read_dotenv(
+            Path(env_file)
+            if env_file is not None
+            else Path(__file__).resolve().parents[1] / ".env"
+        )
+
+        def get(name: str, default: str | None = None) -> str | None:
+            return os.environ[name] if name in os.environ else dotenv.get(name, default)
+
         return cls(
-            host=os.environ.get("APP_HOST", "127.0.0.1"),
-            port=int(os.environ.get("APP_PORT", "8787")),
+            host=get("APP_HOST", "127.0.0.1"),
+            port=int(get("APP_PORT", "8787")),
             data_directory=Path(
-                os.environ.get("DATA_DIRECTORY", str(_default_data_directory()))
+                get("DATA_DIRECTORY", str(_default_data_directory()))
             ),
-            max_json_body=int(os.environ.get("MAX_JSON_BODY", str(1024 * 1024))),
+            max_json_body=int(get("MAX_JSON_BODY", str(1024 * 1024))),
             max_upload_body=int(
-                os.environ.get("MAX_UPLOAD_BODY", str(10 * 1024 * 1024))
+                get("MAX_UPLOAD_BODY", str(10 * 1024 * 1024))
             ),
             max_ai_response=int(
-                os.environ.get("MAX_AI_RESPONSE", str(5 * 1024 * 1024))
+                get("MAX_AI_RESPONSE", str(5 * 1024 * 1024))
             ),
-            ai_provider=os.environ.get("AI_PROVIDER", "generic").strip().lower(),
-            ai_endpoint=os.environ.get("AI_ENDPOINT") or None,
-            ai_model=os.environ.get("AI_MODEL", "configured-model"),
-            ai_api_key=os.environ.get("AI_API_KEY") or None,
-            ai_timeout_seconds=float(os.environ.get("AI_TIMEOUT_SECONDS", "30")),
-            gemini_api_key=os.environ.get("GEMINI_API_KEY") or None,
+            ai_provider=get("AI_PROVIDER", "generic").strip().lower(),
+            ai_endpoint=get("AI_ENDPOINT") or None,
+            ai_model=get("AI_MODEL", "configured-model"),
+            ai_api_key=get("AI_API_KEY") or None,
+            ai_timeout_seconds=float(get("AI_TIMEOUT_SECONDS", "30")),
+            gemini_api_key=get("GEMINI_API_KEY") or None,
             gemini_models=tuple(
                 model.strip()
-                for model in os.environ.get(
+                for model in get(
                     "GEMINI_CV_PARSE_MODELS", ",".join(DEFAULT_GEMINI_MODELS)
                 ).split(",")
                 if model.strip()
             ),
             gemini_timeout_seconds=float(
-                os.environ.get("GEMINI_CV_PARSE_TIMEOUT_MS", "45000")
+                get("GEMINI_CV_PARSE_TIMEOUT_MS", "45000")
             )
             / 1000.0,
         )
