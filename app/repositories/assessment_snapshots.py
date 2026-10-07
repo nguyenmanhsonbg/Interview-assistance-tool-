@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import uuid
 from typing import Any, Sequence
 
 from app.domain.errors import ResourceNotFound
 from app.repositories.base import RepositoryBase
+
+
+_ASSESSMENT_INPUT_SOURCES = {"EXCEL_IMPORT", "HTML_IMPORT"}
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 class AssessmentSnapshotRepository(RepositoryBase):
@@ -16,13 +21,25 @@ class AssessmentSnapshotRepository(RepositoryBase):
         *,
         case_id: str,
         question_set_id: str,
-        workbook_sha256: str,
+        source_kind: str,
+        source_file_sha256: str,
+        package_id: str | None,
         normalized_fingerprint: str,
         idempotency_key_hash: str,
         document_manifest: list[dict[str, Any]],
         questions: Sequence[dict[str, Any]],
         answers: Sequence[dict[str, Any]],
     ) -> dict[str, Any]:
+        if source_kind not in _ASSESSMENT_INPUT_SOURCES:
+            raise ValueError("Unsupported assessment input source")
+        if not isinstance(source_file_sha256, str) or not _SHA256_RE.fullmatch(
+            source_file_sha256
+        ):
+            raise ValueError("Invalid source file SHA-256")
+        if package_id is not None and (
+            not isinstance(package_id, str) or not package_id.strip() or len(package_id) > 256
+        ):
+            raise ValueError("Invalid assessment package ID")
         previous = connection.execute(
             "SELECT COALESCE(MAX(version_no), 0) AS version_no "
             "FROM assessment_snapshots WHERE interview_case_id=?",
@@ -34,17 +51,21 @@ class AssessmentSnapshotRepository(RepositoryBase):
             """INSERT INTO assessment_snapshots(
                 id, interview_case_id, question_set_id, version_no,
                 source_kind, workbook_sha256, normalized_fingerprint,
-                idempotency_key_hash, document_manifest_json
-            ) VALUES (?, ?, ?, ?, 'EXCEL_IMPORT', ?, ?, ?, ?)""",
+                idempotency_key_hash, document_manifest_json,
+                assessment_input_source, source_file_sha256, package_id
+            ) VALUES (?, ?, ?, ?, 'EXCEL_IMPORT', ?, ?, ?, ?, ?, ?, ?)""",
             (
                 snapshot_id,
                 case_id,
                 question_set_id,
                 version_no,
-                workbook_sha256,
+                source_file_sha256,
                 normalized_fingerprint,
                 idempotency_key_hash,
                 json.dumps(document_manifest, ensure_ascii=False, separators=(",", ":")),
+                source_kind,
+                source_file_sha256,
+                package_id,
             ),
         )
         for question in questions:
@@ -160,9 +181,11 @@ class AssessmentSnapshotRepository(RepositoryBase):
             "interviewCaseId": row["interview_case_id"],
             "questionSetId": row["question_set_id"],
             "versionNo": row["version_no"],
-            "sourceKind": row["source_kind"],
+            "sourceKind": row["assessment_input_source"],
             "status": row["status"],
             "workbookSha256": row["workbook_sha256"],
+            "sourceFileSha256": row["source_file_sha256"] or row["workbook_sha256"],
+            "packageId": row["package_id"],
             "normalizedFingerprint": row["normalized_fingerprint"],
             "idempotencyKeyHash": row["idempotency_key_hash"],
             "documentManifest": json.loads(row["document_manifest_json"]),

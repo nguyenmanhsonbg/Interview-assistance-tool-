@@ -115,7 +115,7 @@ class ExcelAssessmentService:
         key_hash = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
         existing = self.snapshots.find_by_idempotency(case_id, key_hash)
         if existing is not None:
-            if existing["workbookSha256"] != workbook_hash:
+            if existing["sourceFileSha256"] != workbook_hash:
                 raise StateConflict("Idempotency key was already used for another workbook")
             return self._with_flow_status(existing)
 
@@ -167,7 +167,9 @@ class ExcelAssessmentService:
                 connection,
                 case_id=case_id,
                 question_set_id=question_set["id"],
-                workbook_sha256=workbook_hash,
+                source_kind="EXCEL_IMPORT",
+                source_file_sha256=workbook_hash,
+                package_id=None,
                 normalized_fingerprint=normalized_fingerprint,
                 idempotency_key_hash=key_hash,
                 document_manifest=document_manifest,

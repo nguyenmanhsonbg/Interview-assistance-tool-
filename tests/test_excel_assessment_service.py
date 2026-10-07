@@ -35,6 +35,8 @@ class ExcelAssessmentServiceTests(MigratedDatabaseFixture, unittest.TestCase):
             self.case["id"], filled, idempotency_key="excel-import-1"
         )
         self.assertEqual("EXCEL_IMPORT", snapshot["sourceKind"])
+        self.assertEqual(snapshot["workbookSha256"], snapshot["sourceFileSha256"])
+        self.assertIsNone(snapshot["packageId"])
         self.assertEqual("ANSWERS_IMPORTED", snapshot["refinedFlowStatus"])
         self.assertEqual("Edited in Excel", snapshot["questions"][0]["questionText"])
         self.assertEqual("NOT_ASSESSED", snapshot["answers"][1]["assessmentStatus"])

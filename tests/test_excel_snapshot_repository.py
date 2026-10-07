@@ -51,7 +51,7 @@ class ExcelSnapshotRepositoryTests(MigratedDatabaseFixture, unittest.TestCase):
             "assessment_snapshot_questions",
             "assessment_snapshot_answers",
         }.issubset(tables))
-        self.assertEqual([1, 2, 3], versions)
+        self.assertEqual([1, 2, 3, 4], versions)
 
     def test_snapshot_round_trip_preserves_edited_questions_and_answer_hashes(self):
         from app.repositories.assessment_snapshots import AssessmentSnapshotRepository
@@ -110,7 +110,9 @@ class ExcelSnapshotRepositoryTests(MigratedDatabaseFixture, unittest.TestCase):
                 connection,
                 case_id="case",
                 question_set_id="set",
-                workbook_sha256="b" * 64,
+                source_kind="HTML_IMPORT",
+                source_file_sha256="b" * 64,
+                package_id="package-1",
                 normalized_fingerprint="c" * 64,
                 idempotency_key_hash="d" * 64,
                 document_manifest=document_manifest,
@@ -120,6 +122,10 @@ class ExcelSnapshotRepositoryTests(MigratedDatabaseFixture, unittest.TestCase):
 
         loaded = repository.get(snapshot["id"])
         self.assertEqual(1, loaded["versionNo"])
+        self.assertEqual("HTML_IMPORT", loaded["sourceKind"])
+        self.assertEqual("package-1", loaded["packageId"])
+        self.assertEqual("b" * 64, loaded["sourceFileSha256"])
+        self.assertEqual("b" * 64, loaded["workbookSha256"])
         self.assertEqual("Edited question from Excel", loaded["questions"][0]["questionText"])
         self.assertEqual("NOT_ASSESSED", loaded["answers"][1]["assessmentStatus"])
         self.assertEqual(answers[0]["contentHash"], loaded["answers"][0]["contentHash"])
@@ -154,7 +160,9 @@ class ExcelSnapshotRepositoryTests(MigratedDatabaseFixture, unittest.TestCase):
                 connection,
                 case_id="case",
                 question_set_id="set",
-                workbook_sha256="e" * 64,
+                source_kind="EXCEL_IMPORT",
+                source_file_sha256="e" * 64,
+                package_id=None,
                 normalized_fingerprint="f" * 64,
                 idempotency_key_hash="1" * 64,
                 document_manifest=[],
