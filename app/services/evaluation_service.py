@@ -15,6 +15,7 @@ from app.repositories.audit import append_audit
 from app.repositories.assessment_snapshots import AssessmentSnapshotRepository
 from app.repositories.evaluations import EvaluationRepository
 from app.services.ai_task_service import AITaskService
+from app.services.two_pass_evaluation import TwoPassEvaluationPipeline
 
 
 class EvaluationService:
@@ -30,6 +31,7 @@ class EvaluationService:
         self.provider_name = provider_name
         self.model_name = model_name
         self.tasks = AITaskService(database, SchemaRegistry(schema_root))
+        self.two_pass = TwoPassEvaluationPipeline(self.tasks.schemas, self.tasks.set_phase)
         self.repository = EvaluationRepository(database)
         self.snapshots = AssessmentSnapshotRepository(database)
 
@@ -133,7 +135,8 @@ class EvaluationService:
     def process(self, task_id: str, provider: AIProvider) -> dict[str, Any]:
         task = self.tasks.repository.get(task_id)
         payload = self.provider_payload(task)
-        result = self.tasks.process(task_id, provider, payload_override=payload)
+        runner = self.two_pass.run if task.get("assessmentSnapshotId") else None
+        result = self.tasks.process(task_id, provider, payload_override=payload, runner=runner)
         snapshot_id = task.get("assessmentSnapshotId")
         if snapshot_id and result["status"] in {"COMPLETED", "FAILED"}:
             status = "AI_EVALUATED" if result["status"] == "COMPLETED" else "AI_ANALYSIS_FAILED"

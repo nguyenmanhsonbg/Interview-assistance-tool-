@@ -87,10 +87,14 @@ class AITaskRepository(RepositoryBase):
         pending_retry = retryable and row["retry_count"] < row["max_retry"]
         connection.execute(
             """UPDATE ai_tasks SET status=?, retry_count=?, error_code=?,
-               error_message=?, finished_at=CASE WHEN ?='FAILED'
+               error_message=?, phase=CASE WHEN task_type='EVALUATE_ASSESSMENT'
+               AND assessment_snapshot_id IS NOT NULL AND ?='PENDING_RETRY'
+               THEN 'EVIDENCE_ANALYSIS' ELSE phase END,
+               finished_at=CASE WHEN ?='FAILED'
                THEN strftime('%Y-%m-%dT%H:%M:%fZ','now') ELSE NULL END WHERE id=?""",
             ("PENDING_RETRY" if pending_retry else "FAILED", next_retry,
-             error_code, error_message[:1000], "PENDING_RETRY" if pending_retry else "FAILED", task_id),
+             error_code, error_message[:1000], "PENDING_RETRY" if pending_retry else "FAILED",
+             "PENDING_RETRY" if pending_retry else "FAILED", task_id),
         )
 
     def complete(self, connection: sqlite3.Connection, task: dict[str, Any], *, result_type: str, payload: dict[str, Any]) -> str:

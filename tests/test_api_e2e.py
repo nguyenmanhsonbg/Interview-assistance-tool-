@@ -54,6 +54,16 @@ class FakePilotProvider:
     def evaluate_answers(self, payload):
         return answer_evaluation_v2_payload(answered=True)
 
+    def analyze_answer_evidence(self, payload):
+        from tests.test_two_pass_evaluation import evidence_for
+
+        return evidence_for(payload)
+
+    def synthesize_answer_evaluation(self, payload):
+        from tests.test_two_pass_evaluation import synthesis_for
+
+        return synthesis_for(payload)
+
     def suggest_follow_up(self, payload):
         return {"schemaVersion": "follow-up.v1", "operation": "FOLLOW_UP", "questions": [], "stopCondition": "none", "confidence": 0.5, "limitations": []}
 

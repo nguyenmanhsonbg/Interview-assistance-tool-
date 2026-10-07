@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from typing import Any
+from typing import Any, Callable
 
 from app.ai.provider import AIProvider, ProviderError
 from app.ai.prompts import RETRY_REPAIR_INSTRUCTION
@@ -80,7 +80,7 @@ class AITaskService:
                 raise StateConflict("AI phase is only available for snapshot evaluation")
             self.repository.set_phase(connection, task_id, phase)
 
-    def process(self, task_id: str, provider: AIProvider, *, payload_override: dict[str, Any] | None = None, context_override: dict[str, Any] | None = None) -> dict[str, Any]:
+    def process(self, task_id: str, provider: AIProvider, *, payload_override: dict[str, Any] | None = None, context_override: dict[str, Any] | None = None, runner: Callable[[dict[str, Any], AIProvider, dict[str, Any]], dict[str, Any]] | None = None) -> dict[str, Any]:
         task = self.repository.get(task_id)
         if task["status"] == "COMPLETED":
             return task
@@ -93,7 +93,10 @@ class AITaskService:
             if task["status"] == "PENDING_RETRY":
                 payload = dict(payload)
                 payload["repairInstruction"] = RETRY_REPAIR_INSTRUCTION
-            if task["taskType"] == "GENERATE_QUESTIONS":
+            if runner is not None:
+                output = runner(task, provider, payload)
+                operation = result_type = "ANSWER_EVALUATION"
+            elif task["taskType"] == "GENERATE_QUESTIONS":
                 output = provider.generate_questions(payload)
                 operation = result_type = "QUESTION_GENERATION"
             elif task["taskType"] in {"EVALUATE_ASSESSMENT", "GENERATE_BRIEF"}:

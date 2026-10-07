@@ -14,15 +14,31 @@ from tests.support import MigratedDatabaseFixture
 
 class RefinedEvaluationProvider:
     def evaluate_answers(self, payload):
+        raise AssertionError("snapshot evaluation must use the two-pass provider methods")
+
+    def analyze_answer_evidence(self, payload):
+        from tests.test_two_pass_evaluation import evidence_for
+
         self.payload = payload
-        return answer_evaluation_v2_payload()
+        return evidence_for(payload)
+
+    def synthesize_answer_evaluation(self, payload):
+        from tests.test_two_pass_evaluation import synthesis_for
+
+        return synthesis_for(payload)
 
 
 class FailedRefinedEvaluationProvider:
     def evaluate_answers(self, payload):
+        raise AssertionError("snapshot evaluation must use the two-pass provider methods")
+
+    def analyze_answer_evidence(self, payload):
         from app.ai.provider import ProviderError
 
         raise ProviderError("provider rejected request", code="AI_BAD_REQUEST", retryable=False)
+
+    def synthesize_answer_evaluation(self, payload):
+        raise AssertionError("synthesis must not run after evidence failure")
 
 
 class RefinedEvaluationTests(MigratedDatabaseFixture, unittest.TestCase):
