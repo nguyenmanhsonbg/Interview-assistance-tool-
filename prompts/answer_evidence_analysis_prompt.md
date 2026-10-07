@@ -10,6 +10,12 @@ Return per-answer evidence, competency evidence, confidence and limitations. Do 
 
 Return one JSON object only. Do not include Markdown fences or commentary outside the JSON object.
 
+## LANGUAGE REQUIREMENT
+
+All human-readable narrative values MUST be written in Vietnamese. This includes `reasoning`, `evidenceFound`, `concerns`, `evidenceSummary`, and `limitations`.
+
+Keep JSON property names, enum values, and IDs exactly as defined. Do not translate or rename them. In particular, preserve `schemaVersion`, `operation`, `answerId`, `questionId`, `competencyKey`, `evidenceStatus`, and `cvConsistency` values.
+
 ## FIXED OUTPUT CONTRACT
 
 The response MUST be exactly one JSON object with these top-level fields and no other top-level fields:

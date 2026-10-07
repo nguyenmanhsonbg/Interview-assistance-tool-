@@ -154,6 +154,21 @@ class AISchemaTests(unittest.TestCase):
         self.assertIn("ANSWER_EVIDENCE_ANALYSIS", evidence_prompt)
         self.assertIn("ANSWER_EVALUATION", synthesis_prompt)
 
+    def test_two_pass_prompts_require_vietnamese_narrative_values_only(self):
+        from app.ai.prompts import PromptCatalog
+
+        catalog = PromptCatalog(Path(__file__).resolve().parents[1] / "prompts")
+        evidence_prompt = catalog.render("answer_evidence_analysis", {})
+        synthesis_prompt = catalog.render("answer_evaluation_synthesis", {})
+
+        for prompt in (evidence_prompt, synthesis_prompt):
+            self.assertIn("All human-readable narrative values MUST be written in Vietnamese.", prompt)
+            self.assertIn("Keep JSON property names, enum values, and IDs exactly as defined", prompt)
+            self.assertIn("Do not translate or rename them", prompt)
+
+        self.assertIn("`reasoning`, `evidenceFound`, `concerns`, `evidenceSummary`", evidence_prompt)
+        self.assertIn("`reasoning`, `evidenceFound`, `concerns`, `summary`, `strengths`", synthesis_prompt)
+
     def test_two_pass_prompts_declare_fixed_nested_output_contract(self):
         from app.ai.prompts import PromptCatalog
 
