@@ -10,7 +10,7 @@
 | Loại tài liệu | Specification giao diện và hướng dẫn triển khai cho Codex |
 | Concept | Interview Workspace — không gian xử lý theo từng hồ sơ |
 | Người dùng chính | HĐCM / điều phối viên có Committee session |
-| Phạm vi | Flow JD/CV → sinh câu hỏi → xuất Excel → nhập Excel → AI đánh giá |
+| Phạm vi | Flow JD/CV → sinh câu hỏi → xuất candidate HTML → nhập response HTML → AI đánh giá |
 | Trạng thái | Sẵn sàng làm đầu vào triển khai UI; các khác biệt contract phải được kiểm tra tại repository |
 | Kết quả cần bàn giao | UI thật tích hợp API hiện có, các trạng thái lỗi/khôi phục, kiểm thử và hướng dẫn vận hành |
 
@@ -43,7 +43,7 @@ Tên bên dưới là tên gốc trong repository; tìm theo tên nếu thư m�
 
 ### 2.2. Quy tắc ưu tiên
 
-1. Flow Excel bổ sung xác định phạm vi active của UI mới. Không khôi phục Candidate Mode, Interview Brief, Live Interview hoặc Final Evaluation vào navigation.
+1. Flow candidate HTML bổ sung xác định phạm vi active của UI mới. Không khôi phục Candidate Mode, Interview Brief, Live Interview hoặc Final Evaluation vào navigation.
 2. Technology Specification xác định runtime. Không chuyển sang WPF, React, Vue hoặc thêm build pipeline.
 3. Tài liệu này xác định layout, token, component, copy, interaction và acceptance của UI mới.
 4. Payload và endpoint phải khớp implementation đã kiểm chứng và contract đã được áp dụng. Sai khác giữa code và tài liệu phải ghi trong báo cáo tích hợp; không âm thầm coi code sai là contract mới.
@@ -120,7 +120,7 @@ This addendum supersedes the earlier Excel-only wording for the active assessmen
 
 `Question Set approved on machine B -> export candidate-html.v1 -> candidate works offline on machine A -> response HTML downloaded -> machine B imports response -> immutable snapshot -> AI evaluation.`
 
-Machine B remains localhost-only. Machine A does not connect to the app, does not receive a token or internal data, and only opens the self-contained file. Excel export/import remains the visible operational fallback. The accepted protection target is ordinary operational errors rather than deliberate tampering.
+Machine B remains localhost-only. Machine A does not connect to the app, does not receive a token or internal data, and only opens the self-contained file. Excel export/import may remain backend-compatible for legacy/manual recovery, but is not shown as an active answer-screen section. The accepted protection target is ordinary operational errors rather than deliberate tampering.
 
 ## 5. Visual design system
 
@@ -304,48 +304,60 @@ Replace tài liệu tạo version mới, không sửa snapshot đã dùng. Nếu
 
 **Edit:** dùng PATCH hiện có cho GENERATED/DRAFT nếu được phép. Form edit có Save/Cancel; không autosave mutation theo mỗi phím. Add/delete/reorder chỉ xuất hiện khi backend cho phép và vẫn giữ ID/version rule. Khi set khóa, hiển thị chỉ đọc và giải thích. Không thêm mandatory approval/check-in vào flow Excel; export GENERATED hoặc APPROVED theo contract hiện tại.
 
-**Export:**
+**Export candidate package (primary):**
 
-- CTA chính “Xuất Excel” khi set hợp lệ và đủ prerequisites.
-- POST export qua binary helper; chỉ báo thành công sau HTTP success và nhận body xlsx hợp lệ về MIME/size cơ bản.
+- CTA chính “Xuất bộ câu hỏi HTML cho ứng viên” khi set hợp lệ và đủ prerequisites.
+- POST `/candidate-package/export` qua binary helper; chỉ báo thành công sau HTTP success và nhận attachment `candidate-html.v1` hợp lệ.
 - Tạo Blob URL và anchor download với safe filename; revoke URL sau khi đã dùng. Không parse bytes như JSON.
-- HTTP error được đọc theo JSON error envelope; không tải error JSON thành file `.xlsx`.
-- Copy hướng dẫn: “Dùng lại file này để nhập câu trả lời. Giữ nguyên mã hồ sơ, mã bộ câu hỏi và mã từng câu.”
-- Sau export thành công: refetch state, CTA tiếp theo “Nhập Excel đã trả lời”.
-- Download lại dùng đúng set/version mà server cho phép; không tạo workbook ở browser.
+- HTTP error được đọc theo JSON error envelope; không tải error JSON thành file HTML.
+- Copy hướng dẫn: “Gửi file HTML cho ứng viên làm bài offline. Sau khi nộp, nhận lại file response HTML để nhập vào hệ thống.”
+- Sau export thành công: chuyển tới bước Câu trả lời để import response HTML.
+
+Excel export/import chỉ còn là CTA fallback được gắn nhãn rõ ở bước Bộ câu hỏi; không phải luồng chính của màn hình Câu trả lời.
 
 ### S-06. Câu trả lời — `/cases/:caseId/answers`
 
 **Trước import:**
 
-- File chooser `accept=".xlsx"`, drag/drop chỉ là enhancement của chooser.
-- Hiển thị tên file, size và kiểm tra extension/limit trước gửi. `.xls`/`.xlsm` bị từ chối rõ ràng.
-- CTA “Nhập và kiểm tra Excel”. Thao tác này gửi bytes và có thể tạo snapshot ngay; không gọi đây là preview không ghi dữ liệu.
+- File chooser `accept=".html,text/html"`, drag/drop chỉ là enhancement của chooser.
+- Hiển thị tên file, size và kiểm tra extension/limit trước gửi. File không phải response HTML bị từ chối rõ ràng.
+- CTA “Import câu trả lời HTML”. Thao tác này gửi bytes tới `/candidate-package/import` và có thể tạo snapshot ngay; không gọi đây là preview không ghi dữ liệu.
 - Chọn file mới chỉ thay local selection, chưa thay snapshot server.
 - Giữ separate pending/imported UI để không hiển thị file vừa chọn như bản nhập thành công.
 
 **Sau import thành công:**
 
+- Response package phải là `candidate-html.v1` do ứng viên submit trên máy A; backend validate case, Question Set version/fingerprint và exact question projection trước khi tạo snapshot immutable.
 - Hiển thị snapshot ID dạng nhãn ngắn, version, importedAt, Question Set version và số câu answered/total từ snapshot thật.
 - Bảng câu hỏi và câu trả lời chỉ đọc. Chọn hàng mở detail đầy đủ, rubric snapshot và answer status.
-- Câu hỏi đã chỉnh trong Excel dùng nội dung của imported snapshot; không đọc nhầm Question Set hiện hành.
+- Câu hỏi và câu trả lời dùng nội dung của imported snapshot; không đọc nhầm Question Set hiện hành.
 - Nếu backend có diff, hiển thị “Câu hỏi đã thay đổi trong bản nhập”; nếu không có diff thì không bịa số lượng thay đổi.
 - Blank + `isAnswered=false`: “Chưa trả lời”, không tự điền câu trả lời/điểm.
 - CTA riêng “Đánh giá bằng AI” gửi snapshotId cụ thể. Import không tự khởi chạy evaluation trừ khi contract backend đã chốt khác và ghi nhận rõ.
-- “Nhập file khác” nêu rõ tạo bản nhập mới; không hứa hẹn ghi đè bản cũ.
+- “Nhập file HTML khác” nêu rõ tạo bản nhập mới; không hứa hẹn ghi đè bản cũ.
 - Same file/same idempotency key trả cùng snapshot; UI không nhân đôi hàng/version.
 
 **Import failure:**
 
 - Sai case/set/version: “File không khớp hồ sơ hoặc bộ câu hỏi đang xử lý”.
-- Header/row lỗi: hiển thị sheet/row/field và safe message nếu backend cung cấp; không tự đọc OOXML ở browser.
-- Formula/macro/link/embedded object/ZIP/XML lỗi: “File không đáp ứng định dạng an toàn. Hãy dùng mẫu được xuất từ hệ thống.”
+- Thiếu marker/manifest, package type sai, answer unknown hoặc HTML quá lớn: “File không đáp ứng định dạng an toàn. Hãy dùng file response được xuất từ hệ thống.”
 - Flag answer không nhất quán: yêu cầu sửa file; không tự đổi flag để pass validation.
 - Giữ snapshot/result đã có khi import mới thất bại.
+
+Excel import vẫn được backend hỗ trợ cho legacy/manual recovery, nhưng không hiển thị thành section trong màn hình Câu trả lời active.
 
 ### S-07. Đánh giá AI — `/cases/:caseId/ai`
 
 Màn này chứa ba state: chưa đánh giá, task đang chạy, kết quả đã hoàn thành.
+
+**Active two-pass contract:**
+
+- Một `EVALUATE_ASSESSMENT` task chạy tuần tự hai phase: `EVIDENCE_ANALYSIS` (phân tích evidence theo từng answer) và `EVALUATION_SYNTHESIS` (tổng hợp evaluation cuối).
+- Frontend poll `GET /api/v1/tasks/{taskId}` và ưu tiên `task.phase` để hiển thị lần lượt “AI đang phân tích bằng chứng” và “AI đang tổng hợp đánh giá”; task question-generation vẫn dùng status label hiện có.
+- Chỉ output hợp lệ của `EVALUATION_SYNTHESIS` được materialize thành `AiResult`. Evidence trung gian không hiển thị như result riêng và không được expose qua endpoint mới.
+- Nếu một phase lỗi hoặc output không hợp lệ, task retry theo policy với phase phù hợp; không hiển thị evaluation bán phần. Retry/rerun không overwrite result đã có.
+- Khi rerun đang chạy, result cũ vẫn được hiển thị với Result version và snapshot provenance; không trộn answer/evidence của result cũ với snapshot hiện hành.
+- Implementation active chưa tạo `Interview Brief` hoặc `recommendedLiveQuestions`; UI chỉ hiển thị evaluation cuối, evidence, limitations và provenance.
 
 **Chưa đánh giá:** hiển thị bản nhập được chọn, answered count và CTA “Đánh giá bằng AI”. Nếu thiếu snapshot: hướng dẫn quay lại bước Câu trả lời.
 
@@ -427,6 +439,8 @@ Tên refined status dưới đây xuất phát từ Excel implementation plan. M
 | Generate/read/edit set | POST/GET/PATCH `/api/v1/interview-cases/{caseId}/question-set` | Generate trả 202/taskId; read/edit trả JSON |
 | Export workbook | POST `/api/v1/interview-cases/{caseId}/question-set/export` | Binary xlsx response |
 | Import workbook | POST `/api/v1/interview-cases/{caseId}/assessment-snapshots/import` | Binary xlsx request; JSON snapshot response |
+| Export candidate package | POST `/api/v1/interview-cases/{caseId}/candidate-package/export` | No body; binary `candidate-html.v1` response |
+| Import candidate response | POST `/api/v1/interview-cases/{caseId}/candidate-package/import` | Binary HTML request; JSON snapshot response |
 | Read snapshot | GET `/api/v1/interview-cases/{caseId}/assessment-snapshots/{snapshotId}` | JSON summary/payload theo implementation |
 | Evaluate snapshot | POST `/api/v1/interview-cases/{caseId}/ai/evaluate` | snapshotId, optional forceRerun; 202/taskId |
 | Read current AI result | GET `/api/v1/interview-cases/{caseId}/ai/evaluation` | JSON result theo v2 |
@@ -458,7 +472,7 @@ Các payload bên trong `data` của refined endpoints chưa được mô tả �
 | QuestionSetView | id/version/status, duration, ordered questions, actual total |
 | QuestionView | stable id/order/text, competency, purpose, evidence, rubric, optional category/objective |
 | SnapshotView | id/version/case/set references, document provenance, copied questions, answers, import time |
-| TaskView | id/type/status, safe error, timestamps, result reference nếu có |
+| TaskView | id/type/status/phase, safe error, timestamps, result reference nếu có |
 | EvaluationView | result id/version, snapshot reference, schema version, validated v2 fields |
 
 Adapter phải giữ distinct source Question Set và imported questions. Không gộp hai nguồn chỉ vì cùng question ID. Array nào thiếu là unknown/loading/error theo contract, không tự đổi thành empty success để che lỗi schema.
@@ -469,7 +483,7 @@ Adapter phải giữ distinct source Question Set và imported questions. Không
 
 - Poll mặc định 2 giây; nếu backend có retry hint hợp lệ thì dùng trong khoảng 2–30 giây.
 - Mỗi task chỉ có một poller active. Không tạo interval chồng lặp khi render lại component.
-- `PENDING`: “Đang chờ xử lý”; `RUNNING`: “Đang xử lý”; `PENDING_RETRY`: “Đang thử lại”; `COMPLETED`: “Hoàn thành”; `FAILED`: “Thất bại”.
+- Với evaluation task, `EVIDENCE_ANALYSIS` hiển thị “AI đang phân tích bằng chứng” và `EVALUATION_SYNTHESIS` hiển thị “AI đang tổng hợp đánh giá”. Các task khác dùng status label: `PENDING`: “Đang chờ xử lý”; `RUNNING`: “Đang xử lý”; `PENDING_RETRY`: “Đang thử lại”; `COMPLETED`: “Hoàn thành”; `FAILED`: “Thất bại”.
 - Poll thất bại do network không đồng nghĩa task FAILED. Hiển thị “Chưa cập nhật được trạng thái”, giữ taskId và cho thử tải lại.
 - Dừng poll khi terminal, session invalid hoặc không còn subscriber; tab hidden tạm ngừng request và refetch khi trở lại.
 - Refresh đọc task/resource đã persist để resume; không enqueue lại AI job.

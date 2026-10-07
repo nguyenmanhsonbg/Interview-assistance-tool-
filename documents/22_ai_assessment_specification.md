@@ -13,7 +13,7 @@
 
 ## 1. Mục tiêu và nguyên tắc
 
-AI hỗ trợ HĐCM chuẩn bị câu hỏi, đánh giá sơ bộ answer và tạo Interview Brief. AI không tuyển, không loại, không chuyển case sang PASS hoặc FAIL và không thay thế final evaluation của HĐCM.
+AI hỗ trợ HĐCM chuẩn bị câu hỏi và đánh giá sơ bộ answer. Interview Brief/follow-up là capability định hướng cho phase sau. AI không tuyển, không loại, không chuyển case sang PASS hoặc FAIL và không thay thế final evaluation của HĐCM.
 
 Mỗi AI call phải:
 
@@ -30,10 +30,10 @@ Mỗi AI call phải:
 | Capability | Task type | Input chính | Output chính |
 | --- | --- | --- | --- |
 | Generate questions | GENERATE_QUESTIONS | JD text, CV text, job/level, policy | Competency matrix, 5–8 proposed questions, rubric, evidence |
-| Evaluate answers | EVALUATE_ASSESSMENT | JD/CV, approved Question Set, answers | Per-answer score/evidence, competency analysis, gaps, conflicts, risks, brief data |
+| Evaluate answers | EVALUATE_ASSESSMENT | JD/CV, approved Question Set, answers | Two-pass per-answer evidence analysis and synthesized evaluation |
 | Suggest follow-up | SUGGEST_FOLLOW_UP | Interview Brief, live notes, remaining competencies | 1–3 live follow-up questions, reason, evidence, stop condition |
 
-Evaluate answers tạo dữ liệu đủ để render Interview Brief. Nếu cần tách task GENERATE_BRIEF, task đó phải tham chiếu cùng evaluation result và không tự tạo kết luận mới.
+Trong implementation active, `EVALUATE_ASSESSMENT` chạy hai phase trong cùng persistent task: phân tích evidence theo từng answer trước, sau đó tổng hợp thành evaluation. `Interview Brief` và `recommendedLiveQuestions` tạm thời chưa thuộc output active; sẽ được thiết kế ở phase sau mà không thay đổi final authority của HĐCM.
 
 ## 3. Input contract chung
 
@@ -140,9 +140,16 @@ Output phải có:
 
 AI question output chỉ là DRAFT. HĐCM phải chỉnh/sắp xếp/duyệt trước khi case chuyển QUESTIONS_APPROVED.
 
-### 4.2. Evaluate answers
+### 4.2. Evaluate answers — active two-pass contract
 
-Output phải có:
+Một task `EVALUATE_ASSESSMENT` thực hiện tuần tự:
+
+1. `EVIDENCE_ANALYSIS`: provider phân tích từng answer theo câu hỏi, competency và rubric, trả `answer-evidence.v1`. Kết quả trung gian chỉ dùng trong task, không materialize thành `AiResult` và không expose qua public endpoint.
+2. `EVALUATION_SYNTHESIS`: provider nhận input đã sanitize cùng evidence analysis, trả `answer-evaluation.v2`. Chỉ output phase này được validate và materialize thành `AiResult`.
+
+Task phải expose phase an toàn để frontend polling hiển thị đúng tiến trình. Nếu phase 1 hoặc phase 2 lỗi/schema không hợp lệ, task retry theo policy; không tạo partial/final result. Rerun tạo task/result version mới và giữ nguyên result cũ.
+
+Output phase `EVALUATION_SYNTHESIS` phải có:
 
 - schemaVersion.
 - perAnswerEvaluations.
@@ -151,10 +158,10 @@ Output phải có:
 - gaps.
 - conflicts.
 - risks.
-- recommendedLiveQuestions gồm 3 câu bắt buộc và tối đa 2 câu bổ sung.
-- interviewBrief.
 - confidence.
 - limitations.
+
+`recommendedLiveQuestions` và `interviewBrief` không được yêu cầu, sinh hoặc lưu trong implementation active này.
 
 Mỗi perAnswerEvaluation có:
 
@@ -216,7 +223,9 @@ Answer rỗng phải là NOT_ASSESSED, không phải UNVERIFIED.
 
 confidence là số thực 0.0–1.0, phản ánh độ chắc chắn của AI về evidence analysis, không phải xác suất tuyển dụng. AI phải ghi limitations khi confidence thấp hoặc input thiếu.
 
-## 6. Interview Brief contract
+## 6. Interview Brief contract — deferred
+
+Phần này là target contract cho phase sau, chưa được sinh/lưu trong implementation active của `EVALUATE_ASSESSMENT`.
 
 Interview Brief phải đọc được trong 3–5 phút và gồm:
 
@@ -240,7 +249,9 @@ Nếu AI fail, HĐCM có thể tạo brief manual tối thiểu hoặc đi thẳ
 | Prompt key | File | Version |
 | --- | --- | --- |
 | question_generation | prompts/question_generation_prompt.md | question-generation.v1 |
-| answer_evaluation | prompts/answer_evaluation_prompt.md | answer-evaluation.v1 |
+| answer_evidence_analysis | prompts/answer_evidence_analysis_prompt.md | answer-evidence.v1 |
+| answer_evaluation_synthesis | prompts/answer_evaluation_synthesis_prompt.md | answer-evaluation.v2 |
+| answer_evaluation | prompts/answer_evaluation_prompt.md | answer-evaluation.v1 (legacy) |
 | follow_up_question | prompts/follow_up_question_prompt.md | follow-up.v1 |
 
 Prompt không hardcode trong HTTP handler. Provider adapter nhận prompt đã render từ file/versioned template.
@@ -328,7 +339,7 @@ Timeout connect/read lấy từ configuration. AI call không chạy đồng b�
 
 ### Conflict
 
-- Context mô tả cả GenerateInterviewBrief và SuggestFollowUp, Technology Provider interface có generate_questions/evaluate_answers/suggest_follow_up. Tài liệu này coi Interview Brief là output bắt buộc của evaluate_answers; không thêm method runtime ngoài interface đã chốt.
+- Context mô tả cả GenerateInterviewBrief và SuggestFollowUp, nhưng implementation active hiện chỉ materialize output evaluation hai phase; Interview Brief/follow-up được giữ ở backlog và không được giả lập trong UI/runtime.
 - Context gọi score 0–4 là “khuyến nghị”; quyết định 1A đã chốt score range và rubric chung cho MVP.
 
 ### Assumption
@@ -351,7 +362,7 @@ Timeout connect/read lấy từ configuration. AI call không chạy đồng b�
 3. Có schema JSON tương ứng cho cả ba capability.
 4. Có rubric 0–4 và evidence status đúng Context.
 5. Có strengths, gaps, concerns, conflicts, missing evidence và confidence.
-6. Có Interview Brief tối đa 3–5 phút đọc.
+6. Có Interview Brief tối đa 3–5 phút đọc khi capability deferred được kích hoạt.
 7. Có validation thủ công, retry tối đa một lần, timeout và manual fallback.
 8. Có rerun versioning/idempotency, không overwrite.
 9. Có prompt injection protection và data minimization.
