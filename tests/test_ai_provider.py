@@ -83,6 +83,27 @@ class AIProviderTests(unittest.TestCase):
         with self.assertRaises(ProviderError):
             provider.suggest_follow_up({})
 
+    def test_two_pass_operations_send_distinct_operation_and_prompt_metadata(self):
+        from app.ai.http_provider import HttpAIProvider
+
+        captured = []
+
+        def opener(request, timeout):
+            captured.append(json.loads(request.data.decode("utf-8")))
+            return FakeResponse(b'{"ok":true}')
+
+        provider = HttpAIProvider(
+            "https://ai.example.test", api_key=None, model="model-1",
+            opener=opener, sleep=lambda _: None,
+        )
+        provider.analyze_answer_evidence({"answer": "evidence"})
+        provider.synthesize_answer_evaluation({"evidence": "validated"})
+
+        self.assertEqual("ANALYZE_ANSWER_EVIDENCE", captured[0]["operation"])
+        self.assertEqual("answer-evidence.v1", captured[0]["promptVersion"])
+        self.assertEqual("SYNTHESIZE_ANSWER_EVALUATION", captured[1]["operation"])
+        self.assertEqual("answer-evaluation.v2", captured[1]["promptVersion"])
+
 
 if __name__ == "__main__":
     unittest.main()

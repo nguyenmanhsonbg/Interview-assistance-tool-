@@ -31,6 +31,12 @@ class HttpAIProvider:
     def generate_questions(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._call("GENERATE_QUESTIONS", payload)
 
+    def analyze_answer_evidence(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._call("ANALYZE_ANSWER_EVIDENCE", payload)
+
+    def synthesize_answer_evaluation(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._call("SYNTHESIZE_ANSWER_EVALUATION", payload)
+
     def evaluate_answers(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._call("EVALUATE_ASSESSMENT", payload)
 
@@ -40,6 +46,8 @@ class HttpAIProvider:
     def _call(self, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
         prompt_key = {
             "GENERATE_QUESTIONS": "question_generation",
+            "ANALYZE_ANSWER_EVIDENCE": "answer_evidence_analysis",
+            "SYNTHESIZE_ANSWER_EVALUATION": "answer_evaluation_synthesis",
             "EVALUATE_ASSESSMENT": "answer_evaluation",
             "SUGGEST_FOLLOW_UP": "follow_up_question",
         }[operation]

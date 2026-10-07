@@ -189,6 +189,24 @@ class GeminiProviderTests(unittest.TestCase):
         self.assertNotIn("secret-key", log_output.getvalue())
         logger.removeHandler(handler)
 
+    def test_two_pass_operations_use_versioned_prompts_and_response_schemas(self):
+        captured = []
+
+        def opener(request, timeout):
+            captured.append(json.loads(request.data.decode("utf-8")))
+            return FakeResponse(gemini_response('{"status":"ok"}'))
+
+        provider = self.make_provider(opener, models=("gemini-3.6-flash",))
+        provider.analyze_answer_evidence({"answer": "evidence"})
+        provider.synthesize_answer_evaluation({"evidence": "validated"})
+
+        self.assertIn("ANSWER_EVIDENCE_ANALYSIS", captured[0]["contents"][0]["parts"][0]["text"])
+        self.assertIn("answer-evidence.v1", captured[0]["contents"][0]["parts"][0]["text"])
+        self.assertIn("ANSWER_EVALUATION", captured[1]["contents"][0]["parts"][0]["text"])
+        self.assertIn("answer-evaluation.v2", captured[1]["contents"][0]["parts"][0]["text"])
+        self.assertEqual("OBJECT", captured[0]["generationConfig"]["responseSchema"]["type"])
+        self.assertEqual("OBJECT", captured[1]["generationConfig"]["responseSchema"]["type"])
+
     def test_rotates_after_network_error_and_empty_response(self):
         for failure in (urllib.error.URLError("offline"), "empty"):
             calls = []

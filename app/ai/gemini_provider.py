@@ -25,11 +25,15 @@ _MODEL_ALIASES = {
 _CANONICAL_MODELS = frozenset(DEFAULT_GEMINI_MODELS)
 _OPERATION_CONFIG = {
     "GENERATE_QUESTIONS": "question_generation",
+    "ANALYZE_ANSWER_EVIDENCE": "answer_evidence_analysis",
+    "SYNTHESIZE_ANSWER_EVALUATION": "answer_evaluation_synthesis",
     "EVALUATE_ASSESSMENT": "answer_evaluation",
     "SUGGEST_FOLLOW_UP": "follow_up_question",
 }
 _OPERATION_TEMPERATURE = {
     "GENERATE_QUESTIONS": 0.2,
+    "ANALYZE_ANSWER_EVIDENCE": 0.1,
+    "SYNTHESIZE_ANSWER_EVALUATION": 0.1,
     "EVALUATE_ASSESSMENT": 0.1,
     "SUGGEST_FOLLOW_UP": 0.2,
 }
@@ -125,6 +129,46 @@ _QUESTION_GENERATION_RESPONSE_SCHEMA = {
         "conflicts", "estimatedDurationSeconds", "confidence", "limitations",
     ],
 }
+_EVIDENCE_RESPONSE_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "schemaVersion": {"type": "STRING", "enum": ["answer-evidence.v1"]},
+        "operation": {"type": "STRING", "enum": ["ANSWER_EVIDENCE_ANALYSIS"]},
+        "perAnswerEvidence": {"type": "ARRAY", "items": {"type": "OBJECT"}},
+        "competencyEvidence": {"type": "ARRAY", "items": {"type": "OBJECT"}},
+        "confidence": {"type": "NUMBER"},
+        "limitations": {"type": "ARRAY", "items": {"type": "STRING"}},
+    },
+    "required": [
+        "schemaVersion", "operation", "perAnswerEvidence",
+        "competencyEvidence", "confidence", "limitations",
+    ],
+}
+_EVALUATION_RESPONSE_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "schemaVersion": {"type": "STRING", "enum": ["answer-evaluation.v2"]},
+        "operation": {"type": "STRING", "enum": ["ANSWER_EVALUATION"]},
+        "perAnswerEvaluations": {"type": "ARRAY", "items": {"type": "OBJECT"}},
+        "competencyEvaluations": {"type": "ARRAY", "items": {"type": "OBJECT"}},
+        "strengths": {"type": "ARRAY", "items": {"type": "STRING"}},
+        "gaps": {"type": "ARRAY", "items": {"type": "STRING"}},
+        "conflicts": {"type": "ARRAY", "items": {"type": "STRING"}},
+        "risks": {"type": "ARRAY", "items": {"type": "STRING"}},
+        "confidence": {"type": "NUMBER"},
+        "limitations": {"type": "ARRAY", "items": {"type": "STRING"}},
+    },
+    "required": [
+        "schemaVersion", "operation", "perAnswerEvaluations",
+        "competencyEvaluations", "strengths", "gaps", "conflicts", "risks",
+        "confidence", "limitations",
+    ],
+}
+_OPERATION_RESPONSE_SCHEMAS = {
+    "GENERATE_QUESTIONS": _QUESTION_GENERATION_RESPONSE_SCHEMA,
+    "ANALYZE_ANSWER_EVIDENCE": _EVIDENCE_RESPONSE_SCHEMA,
+    "SYNTHESIZE_ANSWER_EVALUATION": _EVALUATION_RESPONSE_SCHEMA,
+}
 _SYSTEM_INSTRUCTION = (
     "You are a safe JSON-only assistant for the supervised interview tool."
 )
@@ -178,6 +222,12 @@ class GeminiAIProvider:
     def generate_questions(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._call("GENERATE_QUESTIONS", payload)
 
+    def analyze_answer_evidence(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._call("ANALYZE_ANSWER_EVIDENCE", payload)
+
+    def synthesize_answer_evaluation(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._call("SYNTHESIZE_ANSWER_EVALUATION", payload)
+
     def evaluate_answers(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._call("EVALUATE_ASSESSMENT", payload)
 
@@ -203,8 +253,9 @@ class GeminiAIProvider:
             "temperature": _OPERATION_TEMPERATURE[operation],
             "responseMimeType": "application/json",
         }
-        if operation == "GENERATE_QUESTIONS":
-            generation_config["responseSchema"] = _QUESTION_GENERATION_RESPONSE_SCHEMA
+        response_schema = _OPERATION_RESPONSE_SCHEMAS.get(operation)
+        if response_schema is not None:
+            generation_config["responseSchema"] = response_schema
         body = json.dumps(
             {
                 "contents": [{"role": "user", "parts": [{"text": prompt}]}],
