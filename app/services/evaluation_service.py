@@ -246,7 +246,9 @@ class EvaluationService:
             "assessmentSnapshotId": snapshot["id"],
             "questionSetId": snapshot["questionSetId"],
             "snapshotVersion": snapshot["versionNo"],
-            "workbookSha256": snapshot["workbookSha256"],
+            "sourceKind": snapshot["sourceKind"],
+            "sourceFileSha256": snapshot["sourceFileSha256"],
+            "packageId": snapshot["packageId"],
             "documents": snapshot["documentManifest"],
             "questions": [
                 {
@@ -275,7 +277,14 @@ class EvaluationService:
         snapshot_id = task["assessmentSnapshotId"]
         snapshot = self.snapshots.get(snapshot_id)
         manifest = task["inputManifest"]
-        if snapshot["interviewCaseId"] != case_id or snapshot["workbookSha256"] != manifest.get("workbookSha256"):
+        snapshot_source_hash = snapshot.get("sourceFileSha256") or snapshot.get("workbookSha256")
+        manifest_source_hash = manifest.get("sourceFileSha256") or manifest.get("workbookSha256")
+        if (
+            snapshot["interviewCaseId"] != case_id
+            or snapshot_source_hash != manifest_source_hash
+            or ("sourceKind" in manifest and snapshot["sourceKind"] != manifest["sourceKind"])
+            or ("packageId" in manifest and snapshot["packageId"] != manifest["packageId"])
+        ):
             raise StateConflict("Evaluation snapshot no longer matches")
         with self.database.connection() as connection:
             header = connection.execute(

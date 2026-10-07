@@ -53,6 +53,9 @@ class RefinedEvaluationTests(MigratedDatabaseFixture, unittest.TestCase):
         self.assertNotIn("A private example", serialized)
         self.assertNotIn("answerText", serialized)
         self.assertEqual(self.snapshot["id"], task["assessmentSnapshotId"])
+        self.assertEqual("EXCEL_IMPORT", task["inputManifest"]["sourceKind"])
+        self.assertEqual(self.snapshot["sourceFileSha256"], task["inputManifest"]["sourceFileSha256"])
+        self.assertIsNone(task["inputManifest"]["packageId"])
         self.assertEqual("AI_ANALYZING", service.refined_status(self.case["id"]))
 
         provider = RefinedEvaluationProvider()

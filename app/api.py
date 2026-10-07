@@ -18,6 +18,7 @@ from app.services.case_service import CaseService
 from app.services.document_service import DocumentService
 from app.services.excel_assessment_service import ExcelAssessmentService
 from app.services.evaluation_service import EvaluationService
+from app.services.html_candidate_package_service import HtmlCandidatePackageService
 from app.services.interview_brief_service import InterviewBriefService
 from app.services.interview_service import InterviewService
 from app.services.question_generation_service import QuestionGenerationService
@@ -49,6 +50,7 @@ class APIController:
             pdf_text_extractor_timeout_seconds=pdf_text_extractor_timeout_seconds,
         )
         self.excel_assessments = ExcelAssessmentService(database)
+        self.html_assessments = HtmlCandidatePackageService(database)
         self.questions = QuestionService(database)
         self.question_generation = QuestionGenerationService(
             database,
@@ -94,7 +96,9 @@ class APIController:
         router.add("PATCH", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set", self.update_question_set, **committee)
         router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set/approve", self.approve_question_set, **committee)
         router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set/export", self.export_question_set, body_mode="none", **committee)
+        router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/candidate-package/export", self.export_candidate_package, body_mode="none", **committee)
         router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/assessment-snapshots/import", self.import_assessment_snapshot, max_body=10 * 1024 * 1024, body_mode="binary", **committee)
+        router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/candidate-package/import", self.import_candidate_package, max_body=10 * 1024 * 1024, body_mode="binary", **committee)
         router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/ai/evaluate", self.evaluate_assessment, **committee)
         router.add("GET", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/ai/evaluation", self.get_ai_evaluation, **committee)
         router.add("GET", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/assessment-snapshots/current", self.get_assessment_snapshot, **committee)
@@ -239,6 +243,28 @@ class APIController:
             request.path_params["case_id"],
             request.raw_body or b"",
             idempotency_key=_idempotency(request, "excel-import"),
+        )
+        return _ok(request, {"snapshot": snapshot}, status=201)
+
+    def export_candidate_package(self, request: Request) -> Response:
+        exported = self.html_assessments.export_question_package(
+            request.path_params["case_id"]
+        )
+        return Response(
+            status=200,
+            body=None,
+            raw_body=exported.content,
+            headers={
+                "Content-Type": exported.content_type,
+                "Content-Disposition": f'attachment; filename="{exported.filename}"',
+            },
+        )
+
+    def import_candidate_package(self, request: Request) -> Response:
+        snapshot = self.html_assessments.import_response(
+            request.path_params["case_id"],
+            request.raw_body or b"",
+            idempotency_key=_idempotency(request, "html-import"),
         )
         return _ok(request, {"snapshot": snapshot}, status=201)
 

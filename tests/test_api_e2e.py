@@ -11,7 +11,40 @@ from app.infrastructure.excel_question_answer import (
     export_question_answer_workbook,
     import_question_answer_workbook,
 )
+from app.infrastructure.html_candidate_package import import_candidate_package
 from tests.ai_fixtures import answer_evaluation_v2_payload, question_generation_payload
+from tests.test_questions import valid_questions
+
+
+def response_html(question_package):
+    package = import_candidate_package(question_package)
+    payload = {
+        "formatVersion": "candidate-html.v1",
+        "packageType": "RESPONSE",
+        "manifest": package.manifest,
+        "questions": package.questions,
+        "answers": [
+            {
+                "questionId": question["questionId"],
+                "answerText": "A concrete answer from HTML" if question["displayOrder"] == 1 else "",
+                "isAnswered": question["displayOrder"] == 1,
+            }
+            for question in package.questions
+        ],
+        "clientState": {"startedAt": "2026-10-07T10:00:00Z", "submittedAt": "2026-10-07T10:10:00Z"},
+    }
+    encoded = (
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+    )
+    return (
+        "<!doctype html><html><body>"
+        '<script id="candidate-package-payload" type="application/json">'
+        + encoded
+        + "</script></body></html>"
+    ).encode("utf-8")
 
 
 class FakePilotProvider:
@@ -90,9 +123,9 @@ class PilotE2ETests(unittest.TestCase):
         return headers
 
     def error_status(self, method, path, body=None, headers=None):
-        data = None if body is None else json.dumps(body).encode("utf-8")
+        data = body if isinstance(body, bytes) else None if body is None else json.dumps(body).encode("utf-8")
         request_headers = dict(headers or {})
-        if data is not None:
+        if data is not None and not isinstance(body, bytes):
             request_headers["Content-Type"] = "application/json"
         request = urllib.request.Request(
             self.base + path, method=method, data=data, headers=request_headers
@@ -195,6 +228,82 @@ class PilotE2ETests(unittest.TestCase):
         self.assertEqual(404, self.error_status(
             "GET", f"/api/v1/interview-cases/{case['id']}/interview-brief",
             headers=self.committee_headers(False),
+        ))
+
+    def test_complete_html_candidate_package_flow_over_http(self):
+        headers = self.committee_headers()
+        job = self.call("POST", "/api/v1/jobs", {
+            "jobCode": "JOB-HTML", "positionTitle": "Backend Engineer", "targetLevel": "Senior",
+        }, headers=headers)["job"]
+        candidate = self.call("POST", "/api/v1/candidates", {
+            "candidateCode": "CAND-HTML", "fullName": "HTML Candidate",
+        }, headers=headers)["candidate"]
+        case = self.call("POST", "/api/v1/interview-cases", {
+            "candidateId": candidate["id"], "jobId": job["id"],
+            "committeeMembers": [{"displayName": "Lead", "role": "LEAD"}],
+        }, headers=headers)["case"]
+        for document_type, text in (("JD", "Build reliable backend systems"), ("CV", "Built Python services")):
+            document = self.call(
+                "POST", f"/api/v1/interview-cases/{case['id']}/documents",
+                {"documentType": document_type, "sourceKind": "MANUAL_TEXT", "text": text},
+                headers=headers,
+            )["document"]
+            self.call(
+                "POST", f"/api/v1/interview-cases/{case['id']}/documents/{document['id']}/confirm",
+                {"confirmed": True, "textSha256": document["contentSha256"]}, headers=headers,
+            )
+        question_set = self.call(
+            "POST", f"/api/v1/interview-cases/{case['id']}/question-set",
+            {"operation": "MANUAL", "questions": valid_questions(), "durationSeconds": 900},
+            headers=headers,
+        )["questionSet"]
+        member_id = self.call(
+            "GET", f"/api/v1/interview-cases/{case['id']}",
+            headers=self.committee_headers(False),
+        )["case"]["committeeMembers"][0]["id"]
+        self.call(
+            "POST", f"/api/v1/interview-cases/{case['id']}/question-set/approve",
+            {"questionSetId": question_set["id"], "memberId": member_id, "confirmation": "APPROVE_QUESTION_SET"},
+            headers=headers,
+        )
+
+        export_status, export_headers, package_bytes = self.call_binary(
+            "POST", f"/api/v1/interview-cases/{case['id']}/candidate-package/export",
+            headers=headers,
+        )
+        self.assertEqual(200, export_status)
+        self.assertEqual("text/html; charset=utf-8", export_headers["Content-Type"])
+        self.assertIn(".html", export_headers["Content-Disposition"])
+        self.assertEqual("QUESTION", import_candidate_package(package_bytes).package_type)
+
+        response = response_html(package_bytes)
+        imported = self.call_binary(
+            "POST", f"/api/v1/interview-cases/{case['id']}/candidate-package/import",
+            body=response,
+            headers={**headers, "Content-Type": "text/html", "X-Idempotency-Key": "html-http-import-1"},
+        )
+        snapshot = json.loads(imported[2])["data"]["snapshot"]
+        self.assertEqual("HTML_IMPORT", snapshot["sourceKind"])
+        self.assertEqual("ANSWERS_IMPORTED", snapshot["refinedFlowStatus"])
+        self.assertEqual("A concrete answer from HTML", snapshot["answers"][0]["answerText"])
+
+        evaluation_task = self.call(
+            "POST", f"/api/v1/interview-cases/{case['id']}/ai/evaluate",
+            {"snapshotId": snapshot["id"]}, headers=headers,
+        )
+        self.wait_task(evaluation_task["taskId"])
+        result = self.call(
+            "GET", f"/api/v1/interview-cases/{case['id']}/ai/evaluation",
+            headers=self.committee_headers(False),
+        )["result"]
+        self.assertEqual("answer-evaluation.v2", result["payload"]["schemaVersion"])
+        self.assertNotIn("candidate-package-payload", json.dumps(result["payload"]))
+        self.assertEqual(422, self.error_status(
+            "POST", f"/api/v1/interview-cases/{case['id']}/candidate-package/import",
+            body=b"not html package", headers={**headers, "Content-Type": "text/html", "X-Idempotency-Key": "html-http-bad"},
+        ))
+        self.assertEqual(401, self.error_status(
+            "POST", f"/api/v1/interview-cases/{case['id']}/candidate-package/export",
         ))
 
 
