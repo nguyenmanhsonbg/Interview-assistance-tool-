@@ -75,6 +75,35 @@ def answer_evaluation_v2_payload(answered=True):
     }
 
 
+def answer_evidence_payload(answered=True):
+    return {
+        "schemaVersion": "answer-evidence.v1",
+        "operation": "ANSWER_EVIDENCE_ANALYSIS",
+        "perAnswerEvidence": [
+            {
+                "answerId": "answer-1",
+                "questionId": "question-1",
+                "score": 3 if answered else None,
+                "evidenceStatus": "VERIFIED" if answered else "NOT_ASSESSED",
+                "reasoning": "Evidence matches the approved rubric" if answered else "No answer provided",
+                "evidenceFound": ["Specific example"] if answered else [],
+                "concerns": [],
+                "cvConsistency": "CONSISTENT" if answered else "NOT_ASSESSED",
+            }
+        ],
+        "competencyEvidence": [
+            {
+                "competencyKey": "backend",
+                "evidenceSummary": "The answer provides a concrete implementation example" if answered else "No evidence available",
+                "evidenceStatus": "VERIFIED" if answered else "NOT_ASSESSED",
+                "confidence": 0.8,
+            }
+        ],
+        "confidence": 0.8,
+        "limitations": [] if answered else ["The answer was not provided"],
+    }
+
+
 def follow_up_payload():
     return {
         "schemaVersion": "follow-up.v1",

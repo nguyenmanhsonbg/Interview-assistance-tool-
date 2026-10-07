@@ -2,6 +2,7 @@ import unittest
 from pathlib import Path
 
 from tests.ai_fixtures import (
+    answer_evidence_payload,
     answer_evaluation_payload,
     answer_evaluation_v2_payload,
     follow_up_payload,
@@ -58,6 +59,51 @@ class AISchemaTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             self.registry.validate("ANSWER_EVALUATION", invalid)
 
+    def test_answer_evidence_contract_validates_against_snapshot_references(self):
+        self.registry.validate(
+            "ANSWER_EVIDENCE",
+            answer_evidence_payload(),
+            context={
+                "answerIds": {"answer-1"},
+                "questionIds": {"question-1"},
+                "competencyKeys": {"backend"},
+            },
+        )
+
+    def test_answer_evidence_rejects_invalid_references_and_unanswered_score(self):
+        from app.domain.errors import ValidationError
+
+        invalid_reference = answer_evidence_payload()
+        invalid_reference["perAnswerEvidence"][0]["answerId"] = "unknown-answer"
+        with self.assertRaises(ValidationError):
+            self.registry.validate(
+                "ANSWER_EVIDENCE",
+                invalid_reference,
+                context={
+                    "answerIds": {"answer-1"},
+                    "questionIds": {"question-1"},
+                    "competencyKeys": {"backend"},
+                },
+            )
+
+        unanswered = answer_evidence_payload(False)
+        unanswered["perAnswerEvidence"][0]["score"] = 0
+        with self.assertRaises(ValidationError):
+            self.registry.validate("ANSWER_EVIDENCE", unanswered)
+
+        missing = answer_evidence_payload()
+        missing["perAnswerEvidence"] = []
+        with self.assertRaises(ValidationError):
+            self.registry.validate(
+                "ANSWER_EVIDENCE",
+                missing,
+                context={
+                    "answerIds": {"answer-1"},
+                    "questionIds": {"question-1"},
+                    "competencyKeys": {"backend"},
+                },
+            )
+
     def test_prompt_catalog_wraps_untrusted_payload_without_executing_it(self):
         from app.ai.prompts import PromptCatalog
 
@@ -93,6 +139,20 @@ class AISchemaTests(unittest.TestCase):
             prompt.index("BEGIN_UNTRUSTED_INPUT"),
             prompt.index("END_UNTRUSTED_INPUT"),
         )
+
+    def test_two_pass_prompt_catalog_has_versioned_prompts(self):
+        from app.ai.prompts import PromptCatalog
+
+        catalog = PromptCatalog(Path(__file__).resolve().parents[1] / "prompts")
+        evidence_prompt = catalog.render("answer_evidence_analysis", {"answer": "untrusted"})
+        synthesis_prompt = catalog.render("answer_evaluation_synthesis", {"evidence": "untrusted"})
+
+        self.assertEqual("answer-evidence.v1", catalog.version("answer_evidence_analysis"))
+        self.assertEqual("answer-evaluation.v2", catalog.version("answer_evaluation_synthesis"))
+        self.assertIn("BEGIN_UNTRUSTED_INPUT", evidence_prompt)
+        self.assertIn("BEGIN_UNTRUSTED_INPUT", synthesis_prompt)
+        self.assertIn("ANSWER_EVIDENCE_ANALYSIS", evidence_prompt)
+        self.assertIn("ANSWER_EVALUATION", synthesis_prompt)
 
     def test_question_generation_prompt_declares_fixed_top_level_output_contract(self):
         from app.ai.prompts import PromptCatalog

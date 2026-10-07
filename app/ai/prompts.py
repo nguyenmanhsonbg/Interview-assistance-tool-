@@ -16,6 +16,8 @@ _PROMPTS = {
     "question_generation": ("question_generation_prompt.md", "question-generation.v1"),
     "answer_evaluation": ("answer_evaluation_prompt.md", "answer-evaluation.v1"),
     "answer_evaluation_v2": ("answer_evaluation_prompt_v2.md", "answer-evaluation.v2"),
+    "answer_evidence_analysis": ("answer_evidence_analysis_prompt.md", "answer-evidence.v1"),
+    "answer_evaluation_synthesis": ("answer_evaluation_synthesis_prompt.md", "answer-evaluation.v2"),
     "follow_up_question": ("follow_up_question_prompt.md", "follow-up.v1"),
 }
 

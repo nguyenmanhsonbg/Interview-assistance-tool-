@@ -10,6 +10,7 @@ from app.domain.errors import ValidationError
 
 _SCHEMA_FILES = {
     "QUESTION_GENERATION": {"question-generation.v1": "question_generation.schema.json"},
+    "ANSWER_EVIDENCE": {"answer-evidence.v1": "answer_evidence.v1.schema.json"},
     "ANSWER_EVALUATION": {
         "answer-evaluation.v1": "answer_evaluation.schema.json",
         "answer-evaluation.v2": "answer_evaluation.v2.schema.json",
@@ -50,8 +51,10 @@ class SchemaRegistry:
         _validate_node(payload, schema, "$")
         if operation == "QUESTION_GENERATION":
             _validate_question_rules(payload)
+        elif operation == "ANSWER_EVIDENCE":
+            _validate_evidence_rules(payload, context or {})
         elif operation == "ANSWER_EVALUATION":
-            _validate_evaluation_rules(payload)
+            _validate_evaluation_rules(payload, context or {})
         elif operation == "FOLLOW_UP":
             _validate_follow_up_rules(payload, context or {})
         return payload
@@ -156,11 +159,63 @@ def _validate_question_rules(payload: dict[str, Any]) -> None:
         )
 
 
-def _validate_evaluation_rules(payload: dict[str, Any]) -> None:
+def _validate_evidence_rules(payload: dict[str, Any], context: dict[str, Any]) -> None:
+    answer_ids = context.get("answerIds")
+    question_ids = context.get("questionIds")
+    competency_keys = context.get("competencyKeys")
+    seen_answers: set[str] = set()
+    seen_questions: set[str] = set()
+    for evidence in payload["perAnswerEvidence"]:
+        answer_id = evidence["answerId"]
+        question_id = evidence["questionId"]
+        if answer_id in seen_answers or question_id in seen_questions:
+            raise ValidationError("AI evidence output contains duplicate answer or question references")
+        seen_answers.add(answer_id)
+        seen_questions.add(question_id)
+        if answer_ids is not None and answer_id not in answer_ids:
+            raise ValidationError("AI evidence output references an unknown answer")
+        if question_ids is not None and question_id not in question_ids:
+            raise ValidationError("AI evidence output references an unknown question")
+        not_assessed = evidence["evidenceStatus"] == "NOT_ASSESSED"
+        if not_assessed != (evidence["score"] is None):
+            raise ValidationError("NOT_ASSESSED evidence must have a null score")
+    if answer_ids is not None and seen_answers != set(answer_ids):
+        raise ValidationError("AI evidence output must contain exactly one record for every answer")
+    if question_ids is not None and seen_questions != set(question_ids):
+        raise ValidationError("AI evidence output must contain exactly one record for every question")
+    seen_competencies: set[str] = set()
+    for evidence in payload["competencyEvidence"]:
+        competency_key = evidence["competencyKey"]
+        if competency_key in seen_competencies:
+            raise ValidationError("AI evidence output contains duplicate competency references")
+        seen_competencies.add(competency_key)
+        if competency_keys is not None and competency_key not in competency_keys:
+            raise ValidationError("AI evidence output references an unknown competency")
+
+
+def _validate_evaluation_rules(payload: dict[str, Any], context: dict[str, Any]) -> None:
+    answer_ids = context.get("answerIds")
+    question_ids = context.get("questionIds")
+    seen_answers: set[str] = set()
+    seen_questions: set[str] = set()
     for evaluation in payload["perAnswerEvaluations"]:
+        answer_id = evaluation["answerId"]
+        question_id = evaluation["questionId"]
+        if answer_id in seen_answers or question_id in seen_questions:
+            raise ValidationError("AI evaluation output contains duplicate answer or question references")
+        seen_answers.add(answer_id)
+        seen_questions.add(question_id)
+        if answer_ids is not None and answer_id not in answer_ids:
+            raise ValidationError("AI evaluation output references an unknown answer")
+        if question_ids is not None and question_id not in question_ids:
+            raise ValidationError("AI evaluation output references an unknown question")
         not_assessed = evaluation["evidenceStatus"] == "NOT_ASSESSED"
         if not_assessed != (evaluation["score"] is None):
             raise ValidationError("NOT_ASSESSED answers must have a null score")
+    if answer_ids is not None and seen_answers != set(answer_ids):
+        raise ValidationError("AI evaluation output must contain exactly one record for every answer")
+    if question_ids is not None and seen_questions != set(question_ids):
+        raise ValidationError("AI evaluation output must contain exactly one record for every question")
 
 
 def _normalize_question(value: str) -> str:
