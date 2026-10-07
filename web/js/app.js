@@ -347,10 +347,12 @@ function renderCaseHeader(item, activeStep) {
   const identity = element("div", undefined, "case-identity");
   identity.append(element("h1", safeText(item.candidate?.fullName, "Ứng viên chưa có tên")));
   const meta = element("div", undefined, "case-meta");
+  const lead = item.committeeMembers?.find((member) => member.role === "LEAD");
   meta.append(
     element("span", safeText(item.candidate?.candidateCode)),
     element("span", safeText(item.job?.positionTitle)),
     element("span", safeText(item.job?.targetLevel)),
+    element("span", "Lead HĐCM: " + safeText(lead?.displayName, "Chưa có")),
   );
   identity.append(meta);
   main.append(identity, statusBadge(item.refinedFlowStatus || item.status));
@@ -437,7 +439,7 @@ async function renderCasesWithStatus(statusValue = "", host = null, revision = r
     const table = document.createElement("table");
     const head = document.createElement("thead");
     const headRow = document.createElement("tr");
-    for (const label of ["Ứng viên", "Vị trí", "Lịch", "Trạng thái", "Bước tiếp theo"]) headRow.append(element("th", label));
+    for (const label of ["Ứng viên", "Vị trí", "Trạng thái", "Bước tiếp theo"]) headRow.append(element("th", label));
     head.append(headRow);
     const body = document.createElement("tbody");
     for (const item of items) {
@@ -447,12 +449,11 @@ async function renderCasesWithStatus(statusValue = "", host = null, revision = r
       candidateCell.append(caseLink, element("div", safeText(item.candidate?.candidateCode), "muted"));
       const positionCell = element("td", safeText(item.job?.positionTitle));
       positionCell.append(element("div", safeText(item.job?.targetLevel), "muted"));
-      const schedule = element("td", safeText(item.scheduledAt, "Chưa lên lịch"));
       const workflow = item.refinedFlowStatus || item.status;
       const statusCell = document.createElement("td");
       statusCell.append(statusBadge(workflow));
       const nextCell = element("td", nextStepLabel(workflow));
-      row.append(candidateCell, positionCell, schedule, statusCell, nextCell);
+      row.append(candidateCell, positionCell, statusCell, nextCell);
       body.append(row);
     }
     table.append(head, body);
@@ -485,17 +486,24 @@ async function findOrCreate(url, query, key, body, resultKey) {
   return created[resultKey];
 }
 
+function generateCandidateCode() {
+  const datePart = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+  const randomPart = globalThis.crypto?.randomUUID?.().replaceAll("-", "").slice(0, 8).toUpperCase()
+    || Math.random().toString(36).slice(2, 10).toUpperCase();
+  return "CAND-" + datePart + "-" + randomPart;
+}
+
 async function renderNewCase() {
   const page = renderWorkspacePage("#/cases", "Tạo hồ sơ phỏng vấn", "Tạo một hồ sơ mới trước khi import JD và CV.");
   const form = element("form", undefined, "card stack");
+  const candidateCode = field("Mã ứng viên (tự sinh)", "candidateCode", { value: generateCandidateCode(), required: true });
+  candidateCode.input.readOnly = true;
   const fields = [
-    field("Mã ứng viên", "candidateCode", { required: true }),
+    candidateCode,
     field("Tên ứng viên", "fullName", { required: true }),
-    field("Mã vị trí", "jobCode", { required: true }),
     field("Vị trí", "positionTitle", { required: true }),
     field("Level", "targetLevel", { required: true }),
-    field("Lịch phỏng vấn (tuỳ chọn)", "scheduledAt", { type: "datetime-local" }),
-    field("Tên Lead HĐCM (tuỳ chọn)", "leadName"),
+    field("Tên Lead HĐCM", "leadName", { required: true }),
   ];
   const grid = element("div", undefined, "field-grid");
   for (const item of fields) grid.append(item.label);
@@ -510,15 +518,12 @@ async function renderNewCase() {
 
   formSubmit(form, async () => {
     const values = Object.fromEntries(fields.map((item) => [item.input.name, item.input.value.trim()]));
-    const draftKey = [values.candidateCode, values.jobCode].join("|");
+    const draftKey = [values.candidateCode, values.positionTitle, values.targetLevel].join("|");
     const cached = pendingCaseCreation?.key === draftKey ? pendingCaseCreation : null;
-    const job = cached?.job || await findOrCreate(
-      "/api/v1/jobs",
-      values.jobCode,
-      "jobCode",
-      { jobCode: values.jobCode, positionTitle: values.positionTitle, targetLevel: values.targetLevel },
-      "job",
-    );
+    const job = cached?.job || (await apiFetch("/api/v1/jobs", {
+      method: "POST",
+      body: JSON.stringify({ positionTitle: values.positionTitle, targetLevel: values.targetLevel }),
+    })).job;
     pendingCaseCreation = { key: draftKey, job };
     const candidate = cached?.candidate || await findOrCreate(
       "/api/v1/candidates",
@@ -528,13 +533,12 @@ async function renderNewCase() {
       "candidate",
     );
     pendingCaseCreation = { key: draftKey, job, candidate };
-    const committeeMembers = values.leadName ? [{ displayName: values.leadName, role: "LEAD" }] : [];
+    const committeeMembers = [{ displayName: values.leadName, role: "LEAD" }];
     const created = await apiFetch("/api/v1/interview-cases", {
       method: "POST",
       body: JSON.stringify({
         candidateId: candidate.id,
         jobId: job.id,
-        scheduledAt: values.scheduledAt ? new Date(values.scheduledAt).toISOString() : null,
         assessmentDurationSeconds: 900,
         committeeMembers,
       }),
@@ -584,53 +588,62 @@ function mimeForFile(file) {
   return file.type || "text/plain";
 }
 
-function renderDocumentHistory(versions) {
-  const details = document.createElement("details");
-  const summary = element("summary", "Lịch sử version (chỉ đọc)");
-  const list = element("div", undefined, "stack-sm");
-  for (const version of [...versions].sort((a, b) => b.versionNo - a.versionNo)) {
-    const row = element("div", undefined, "detail-row");
-    row.append(
-      element("span", "Version " + version.versionNo, "detail-label"),
-      element("span", safeText(version.sourceKind) + " · " + safeText(version.extractionStatus) + (version.isAiEligible ? " · Đã xác nhận" : "")),
-    );
-    list.append(row);
-  }
-  details.append(summary, list);
-  return details;
-}
+function openDocumentEditor(caseId, title, type, text) {
+  const opener = document.activeElement;
+  const backdrop = element("div", undefined, "modal-backdrop");
+  const modal = element("section", undefined, "modal");
+  modal.setAttribute("role", "dialog");
+  modal.setAttribute("aria-modal", "true");
 
-function buildDocumentCard(caseId, type, current, versions = []) {
-  const card = element("section", undefined, "card stack");
-  const title = type === "JD" ? "Job Description" : "Curriculum Vitae";
-  card.append(element("h2", title), element("p", type === "JD" ? "Nguồn yêu cầu của vị trí." : "Nguồn kinh nghiệm và bằng chứng của ứng viên.", "muted"));
-  if (current) {
-    const meta = element("div", undefined, "actions");
-    meta.append(element("span", "Version " + current.versionNo, "badge"), statusBadge(current.extractionStatus));
-    if (current.isAiEligible) meta.append(element("span", "Đã xác nhận", "badge success"));
-    card.append(meta);
-    const preview = element("pre", (current.extractedText || "").slice(0, 5000), "answer-text");
-    preview.setAttribute("aria-label", "Preview nội dung " + type);
-    card.append(preview);
-  } else {
-    card.append(element("p", "Chưa có tài liệu hiện hành.", "muted"));
-  }
-  if (versions.length) card.append(renderDocumentHistory(versions));
+  const titleId = "document-modal-title";
+  const editorId = "document-editor-text";
+  const heading = element("h2", title + " — Chỉnh sửa");
+  heading.id = titleId;
+  const description = element("p", "Cập nhật nội dung và lưu để tạo phiên bản tài liệu mới.", "muted");
+  const editor = field("Nội dung " + type, editorId, { type: "textarea", value: text || "" });
+  editor.input.id = editorId;
+  editor.input.className = "document-editor-text";
+  modal.setAttribute("aria-labelledby", titleId);
+  description.id = "document-modal-description";
+  modal.setAttribute("aria-describedby", description.id);
 
-  const text = field("Nhập hoặc dán text " + type, type + "-text", { type: "textarea", value: current?.extractedText || "" });
-  const saveText = button("Lưu text và xác nhận", async () => {
+  let keydownHandler;
+  const closeModal = () => {
+    document.removeEventListener("keydown", keydownHandler);
+    backdrop.remove();
+    opener?.focus?.();
+  };
+  keydownHandler = (event) => {
+    if (event.key === "Escape") closeModal();
+  };
+  const close = element("button", "Đóng", "secondary");
+  close.type = "button";
+  close.addEventListener("click", closeModal);
+  const save = button("Lưu text và xác nhận", async () => {
     const created = await apiFetch("/api/v1/interview-cases/" + encodeURIComponent(caseId) + "/documents", {
       method: "POST",
-      body: JSON.stringify({ documentType: type, sourceKind: "MANUAL_TEXT", text: text.input.value }),
+      body: JSON.stringify({ documentType: type, sourceKind: "MANUAL_TEXT", text: editor.input.value }),
     });
     await apiFetch("/api/v1/interview-cases/" + encodeURIComponent(caseId) + "/documents/" + encodeURIComponent(created.document.id) + "/confirm", {
       method: "POST",
       body: JSON.stringify({ confirmed: true, textSha256: created.document.contentSha256 }),
     });
+    closeModal();
     await renderDocuments(caseId);
-  }, "secondary");
-  card.append(text.label, saveText);
+  }, "primary");
+  const actions = element("div", undefined, "actions document-actions");
+  actions.append(close, save);
+  backdrop.addEventListener("click", (event) => {
+    if (event.target === backdrop) closeModal();
+  });
+  modal.append(heading, description, editor.label, actions);
+  backdrop.append(modal);
+  document.addEventListener("keydown", keydownHandler);
+  document.body.append(backdrop);
+  editor.input.focus();
+}
 
+function renderTextFileImport(caseId, type) {
   const file = field("Import file TXT, MD hoặc DOCX", type + "-file", { type: "file" });
   file.input.accept = ".txt,.md,.markdown,.docx";
   const importFile = button("Import file " + type, async () => {
@@ -656,7 +669,32 @@ function buildDocumentCard(caseId, type, current, versions = []) {
     });
     await renderDocuments(caseId);
   });
-  card.append(file.label, importFile);
+  return [file.label, importFile];
+}
+
+function buildDocumentCard(caseId, type, current) {
+  const card = element("section", undefined, "card stack");
+  const title = type === "JD" ? "Job Description" : "Curriculum Vitae";
+  card.append(element("h2", title), element("p", type === "JD" ? "Nguồn yêu cầu của vị trí." : "Nguồn kinh nghiệm và bằng chứng của ứng viên.", "muted"));
+  const fullText = current?.extractedText || "";
+  if (current) {
+    const meta = element("div", undefined, "actions");
+    meta.append(element("span", "Version " + current.versionNo, "badge"), statusBadge(current.extractionStatus));
+    if (current.isAiEligible) meta.append(element("span", "Đã xác nhận", "badge success"));
+    card.append(meta);
+  } else {
+    card.append(element("p", "Chưa có tài liệu hiện hành. Bạn có thể nhập nội dung trong popup.", "muted"));
+  }
+  const previewText = fullText.length > 600 ? fullText.slice(0, 600).trimEnd() + "…" : fullText;
+  const preview = element("button", previewText || "Nhập nội dung " + type, "document-preview");
+  preview.type = "button";
+  preview.setAttribute("aria-label", "Mở popup chỉnh sửa nội dung " + type);
+  preview.addEventListener("click", () => openDocumentEditor(caseId, title, type, fullText));
+  card.append(preview);
+
+  if (type === "JD") {
+    card.append(...renderTextFileImport(caseId, type));
+  }
 
   if (type === "CV") {
     const pdf = field("Import CV PDF", "cvPdf", { type: "file" });
@@ -692,11 +730,10 @@ async function renderDocuments(caseId) {
   await renderCasePage(caseId, "documents", async (item) => {
     const data = await apiFetch("/api/v1/interview-cases/" + encodeURIComponent(caseId) + "/documents");
     const current = (type) => data.items?.find((document) => document.documentType === type && document.isCurrent);
-    const versions = (type) => data.items?.filter((document) => document.documentType === type) || [];
     const view = element("div", undefined, "stack");
     view.append(element("div", "Chỉ tài liệu hiện hành đã xác nhận mới được dùng để sinh câu hỏi.", "notice"));
     const grid = element("div", undefined, "content-grid");
-    grid.append(buildDocumentCard(caseId, "JD", current("JD"), versions("JD")), buildDocumentCard(caseId, "CV", current("CV"), versions("CV")));
+    grid.append(buildDocumentCard(caseId, "JD", current("JD")), buildDocumentCard(caseId, "CV", current("CV")));
     view.append(grid);
     const ready = Boolean(current("JD")?.isAiEligible && current("CV")?.isAiEligible);
     const actions = element("div", undefined, "actions");
@@ -773,7 +810,7 @@ function questionGroups(questions) {
 function renderRubric(rubric) {
   const details = document.createElement("details");
   details.className = "rubric";
-  const summary = element("summary", "Rubric chấm điểm");
+  const summary = element("summary", "Tiêu chí đánh giá");
   const list = element("div", undefined, "rubric-list");
   for (const score of ["score0", "score1", "score2", "score3", "score4"]) {
     const row = element("div", undefined, "detail-row");

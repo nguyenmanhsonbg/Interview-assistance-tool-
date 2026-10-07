@@ -80,7 +80,14 @@ class FrontendContractTests(unittest.TestCase):
             "renderCaseHeader",
             "renderCaseStepper",
             "renderCasesWithStatus(status.input.value, listHost",
-            "renderDocumentHistory",
+            "openDocumentEditor",
+            "document-preview",
+            "aria-modal",
+            "renderTextFileImport",
+            "previewText",
+            "document-editor-text",
+            "Lưu text và xác nhận",
+            "Tiêu chí đánh giá",
             "questionPolicy",
             "item.score === null",
             "/settings",
@@ -107,6 +114,13 @@ class FrontendContractTests(unittest.TestCase):
             "assessmentSnapshotId",
         ):
             self.assertIn(marker, scripts)
+        self.assertIn('if (type === "JD")', scripts)
+        self.assertNotIn('renderTextFileImport(caseId, "CV")', scripts)
+        self.assertNotIn('field("Import file TXT, MD hoáº·c DOCX", "CV-file"', scripts)
+        self.assertNotIn("renderDocumentHistory", scripts)
+        self.assertNotIn("Nhập hoặc dán text", scripts)
+        self.assertNotIn("textActions", scripts)
+        self.assertNotIn("Rubric chấm điểm", scripts)
         self.assertNotIn("function manualQuestions", scripts)
 
 

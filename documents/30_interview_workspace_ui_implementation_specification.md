@@ -173,7 +173,7 @@ Không chỉ dùng màu để phân biệt trạng thái. Mỗi badge có text, 
 - Cuối sidebar: “Không gian HĐCM”, trạng thái session và nút “Khóa phiên”. Không hiển thị account giả.
 - Topbar cao khoảng 56 px: breadcrumb bên trái; trạng thái kết nối an toàn bên phải.
 - Main content chiếm phần còn lại, max-width 1280 px, không ép thành một cột hẹp ở giữa màn hình.
-- Case header: candidate code, tên ứng viên, vị trí, target level và badge workflow.
+- Case header: candidate code, tên ứng viên, vị trí, target level, Lead HĐCM và badge workflow.
 - Case navigation có bốn step/tab: “1. JD & CV”, “2. Bộ câu hỏi”, “3. Câu trả lời”, “4. Đánh giá AI”.
 
 ### 6.2. Responsive rules
@@ -228,7 +228,7 @@ Refresh phải tải lại được case và server state. Nếu History API đa
 **Mục tiêu:** nhìn được hồ sơ cần xử lý và mở tiếp đúng bước.
 
 - Header: “Hồ sơ phỏng vấn”; CTA “Tạo hồ sơ”.
-- Bảng có cột: Ứng viên/mã; Vị trí/level; Lịch phỏng vấn nếu có; Trạng thái; Bước tiếp theo.
+- Bảng có cột: Ứng viên/mã; Vị trí/level; Trạng thái; Bước tiếp theo. Không hiển thị lịch phỏng vấn trong màn hình MVP này.
 - Primary row action “Mở hồ sơ”; row link vào bước phù hợp, không mở dialog nội dung lớn.
 - Dùng pagination backend; không tải toàn bộ database để giả lập search toàn hệ thống.
 - Filter trạng thái dùng các giá trị backend hỗ trợ. Nếu list API chưa hỗ trợ refined status filter, không gửi enum mới vào filter legacy.
@@ -244,17 +244,16 @@ Form hai cột desktop, một cột mobile.
 
 | Field | Behavior |
 | --- | --- |
-| Ứng viên | Chọn Candidate đã có hoặc tạo từ candidate code + full name |
+| Ứng viên | Tự sinh candidate code ở form, hiển thị chỉ đọc; nhập full name để tạo Candidate |
 | Vị trí | Chọn Job đã có hoặc tạo từ position title + target level |
-| Lịch phỏng vấn | Optional theo API/domain hiện có; datetime-local chuyển sang UTC khi gửi |
 | Thời lượng dự kiến | Default 900 giây nếu contract vẫn áp dụng; UI hiển thị phút, gửi giây |
-| Thành viên HĐCM | Chỉ hiển thị nếu API hiện có hỗ trợ; tối đa một LEAD theo contract |
+| Lead HĐCM | Bắt buộc nhập tên; tạo đúng một committee member role `LEAD` |
 
 - Không yêu cầu email, số điện thoại hoặc ảnh nếu không thuộc domain đã chốt.
 - Các policy legacy bắt buộc trong POST được điền từ default hợp lệ đã có; không đưa timer/auto-submit thành cấu hình Candidate Mode active.
 - CTA “Tạo hồ sơ và thêm JD/CV”; secondary “Hủy”.
 - Tạo Candidate/Job/Case là các thao tác tuần tự nếu chưa có aggregate endpoint. Lưu ID response để retry phần còn thiếu; không tạo lại Candidate/Job đã thành công khi Case thất bại.
-- Form validation có inline error; duplicate candidate code phải cho chọn record hiện có, không tạo code mới âm thầm.
+- Form validation có inline error; candidate code được sinh một lần cho form và hiển thị chỉ đọc, không cho nhập tay.
 - Chỉ điều hướng khi server trả case ID thật.
 
 ### S-04. JD & CV — `/cases/:caseId/documents`
@@ -263,17 +262,21 @@ Hai card tương đương: “Mô tả công việc” và “CV ứng viên”.
 
 Mỗi card có:
 
-- File/text mode với label “Chọn file” và “Dán văn bản”.
+- Chỉ hiển thị preview ngắn của extracted text; không render toàn bộ JD/CV trong card.
+- Preview JD và CV có cùng kích thước cố định; click preview mở popup chỉnh sửa nội dung đầy đủ.
+- Popup có textarea, nút “Lưu text và xác nhận”, nút “Đóng”, hỗ trợ Esc và click ra ngoài.
 - File name, format, size, version, trạng thái extraction và confirmation.
-- Extracted text dạng plain text trong panel đọc được; nút mở rộng khi nội dung dài.
+- Với JD: hỗ trợ import TXT/Markdown/DOCX; nội dung thủ công được nhập trong popup.
+- Với CV: hỗ trợ import PDF; nội dung thủ công được nhập trong popup, không hiển thị import TXT/Markdown/DOCX.
+- Không hiển thị danh sách lịch sử version trong card; chỉ giữ metadata của phiên bản hiện hành.
 - Action “Nhập tài liệu”, “Xác nhận nội dung”, “Thay bằng phiên bản mới” tùy server state.
 - Technical metadata như hash nằm trong details, không chiếm header hoặc lộ absolute path.
 
-Format: TXT, Markdown, DOCX; PDF chỉ dùng extractor được backend cấu hình hoặc fallback dán text. DOC, DOCM và PDF scan không được UI hứa hẹn hỗ trợ/OCR. Không dùng browser Office viewer để mở file.
+Format theo từng card: JD hỗ trợ TXT, Markdown, DOCX; CV hỗ trợ PDF bằng extractor được backend cấu hình hoặc fallback dán text. DOC, DOCM và PDF scan không được UI hứa hẹn hỗ trợ/OCR. Không dùng browser Office viewer để mở file.
 
 Backend document specification nêu file decoded tối đa 7.5 MiB và upload body tối đa 10 MiB. Codex kiểm tra giới hạn thực tế của document route: route upload phải khác giới hạn JSON thường 1 MiB. UI precheck theo limit được xác minh, backend vẫn là validation cuối. Nếu route thực tế mâu thuẫn, báo dependency; không tự tăng limit.
 
-Manual text phải xem và confirm. PDF extraction thành công có thể đã auto-confirm: hiển thị “Đã xác nhận tự động” khi response thể hiện điều đó; không buộc gọi confirm lần nữa.
+Manual text được chỉnh sửa và confirm trong popup. PDF extraction thành công có thể đã auto-confirm: hiển thị “Đã xác nhận tự động” khi response thể hiện điều đó; không buộc gọi confirm lần nữa.
 
 CTA “Sinh câu hỏi” enabled khi JD/CV hiện hành đủ điều kiện AI và policy hợp lệ. Disable phải có lý do đọc được: “Cần xác nhận nội dung CV”. Sau confirm refetch document/case trước khi enable.
 
@@ -296,7 +299,7 @@ Replace tài liệu tạo version mới, không sửa snapshot đã dùng. Nếu
 - List item có display order, tiêu đề ngắn/nội dung tóm tắt, trạng thái selected. Nội dung đầy đủ trong detail.
 - Group theo category nếu thực sự có; count được tính từ dữ liệu, không ép cơ cấu 3/4/2.
 - Detail: nội dung câu hỏi, competency, source, type/difficulty, purpose, nextStepObjective nếu có, expected evidence, required và estimated seconds nếu có.
-- Rubric 0–4 nằm trong accordion “Tiêu chí chấm 0–4”. Không hiển thị JSON raw làm giao diện chính.
+- Rubric 0–4 nằm trong accordion “Tiêu chí đánh giá”. Không hiển thị JSON raw làm giao diện chính.
 - Source label phản ánh field thực tế; không đổi `AI` thành “JD + CV” nếu backend không có provenance chi tiết.
 
 **Edit:** dùng PATCH hiện có cho GENERATED/DRAFT nếu được phép. Form edit có Save/Cancel; không autosave mutation theo mỗi phím. Add/delete/reorder chỉ xuất hiện khi backend cho phép và vẫn giữ ID/version rule. Khi set khóa, hiển thị chỉ đọc và giải thích. Không thêm mandatory approval/check-in vào flow Excel; export GENERATED hoặc APPROVED theo contract hiện tại.
@@ -450,7 +453,7 @@ Các payload bên trong `data` của refined endpoints chưa được mô tả �
 
 | View model | Dữ liệu tối thiểu |
 | --- | --- |
-| CaseView | id, candidate code/name, job title/level, schedule, effective/refined state |
+| CaseView | id, candidate code/name, job title/level, Lead HĐCM, effective/refined state |
 | DocumentView | id/type/version, extraction state, confirmation/eligibility, extracted text, content hash |
 | QuestionSetView | id/version/status, duration, ordered questions, actual total |
 | QuestionView | stable id/order/text, competency, purpose, evidence, rubric, optional category/objective |
