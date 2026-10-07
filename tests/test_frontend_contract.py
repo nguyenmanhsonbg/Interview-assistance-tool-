@@ -151,6 +151,24 @@ class FrontendContractTests(unittest.TestCase):
         ):
             self.assertIn(marker, scripts)
 
+    def test_two_pass_evaluation_progress_preserves_previous_result_provenance(self):
+        root = Path(__file__).resolve().parents[1] / "web"
+        scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
+
+        for marker in (
+            "taskPhaseLabel",
+            "EVIDENCE_ANALYSIS",
+            "EVALUATION_SYNTHESIS",
+            "AI đang phân tích bằng chứng",
+            "AI đang tổng hợp đánh giá",
+            "Kết quả hiện tại vẫn là bản cũ",
+            "result.versionNo",
+            "renderEvaluationResult(result, resultSnapshot)",
+        ):
+            self.assertIn(marker, scripts)
+        self.assertNotIn("Interview Brief", scripts)
+        self.assertNotIn("recommendedLiveQuestions", scripts)
+
 
 if __name__ == "__main__":
     unittest.main()

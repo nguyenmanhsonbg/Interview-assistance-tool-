@@ -749,8 +749,15 @@ async function renderDocuments(caseId) {
   });
 }
 
-function taskStatusLabel(status) {
+function taskPhaseLabel(phase) {
   return {
+    EVIDENCE_ANALYSIS: "AI đang phân tích bằng chứng",
+    EVALUATION_SYNTHESIS: "AI đang tổng hợp đánh giá",
+  }[phase] || null;
+}
+
+function taskStatusLabel(status, phase) {
+  return taskPhaseLabel(phase) || {
     PENDING: "Đang chờ AI bắt đầu xử lý",
     RUNNING: "AI đang xử lý",
     PENDING_RETRY: "AI đang chờ thử lại",
@@ -780,7 +787,7 @@ function createTaskProgress(label) {
   return {
     panel,
     update(task) {
-      const text = taskStatusLabel(task.status);
+      const text = taskStatusLabel(task.status, task.phase);
       status.textContent = text;
       track.setAttribute("aria-valuetext", text);
     },
@@ -1372,7 +1379,8 @@ async function renderAI(caseId) {
       actionCard.append(element("div", "Đang hiển thị kết quả AI của snapshot v" + resultSnapshot.versionNo + "; snapshot hiện hành là v" + snapshot.versionNo + ".", "notice warning"));
     }
     const taskHost = element("div", undefined, "stack");
-    if (item.activeTaskId && item.refinedFlowStatus === "AI_ANALYZING" && !result) {
+    const evaluationRunning = Boolean(item.activeTaskId && item.refinedFlowStatus === "AI_ANALYZING");
+    if (evaluationRunning) {
       resumeTask(caseId, "ai", item.activeTaskId, taskHost, () => renderAI(caseId), "AI đang đánh giá ứng viên");
     }
     const action = button(result ? "Chạy đánh giá lại" : "Bắt đầu đánh giá bằng AI", async () => {
@@ -1385,8 +1393,11 @@ async function renderAI(caseId) {
       if (!isActiveCaseStep(caseId, "ai")) return;
       await renderAI(caseId);
     }, "primary");
-    if (item.refinedFlowStatus === "AI_ANALYZING" && !result) {
-      actionCard.append(element("div", "AI task đang chạy hoặc đang được materialize. Không tạo task mới; hãy refresh để kiểm tra.", "notice warning"));
+    if (evaluationRunning) {
+      const runningMessage = result
+        ? "Kết quả hiện tại vẫn là bản cũ (Result v" + safeText(result.versionNo) + ", snapshot v" + safeText(resultSnapshot.versionNo) + ") trong khi AI đang tạo phiên đánh giá mới."
+        : "AI task đang chạy hoặc đang được materialize. Không tạo task mới; hãy refresh để kiểm tra.";
+      actionCard.append(element("div", runningMessage, "notice warning"));
     } else {
       actionCard.append(action);
     }
