@@ -48,6 +48,11 @@ def response_html(question_package):
 
 
 class FakePilotProvider:
+    def __init__(self):
+        self.block_evidence = False
+        self.evidence_started = threading.Event()
+        self.release_evidence = threading.Event()
+
     def generate_questions(self, payload):
         return question_generation_payload()
 
@@ -57,6 +62,9 @@ class FakePilotProvider:
     def analyze_answer_evidence(self, payload):
         from tests.test_two_pass_evaluation import evidence_for
 
+        self.evidence_started.set()
+        if self.block_evidence:
+            self.release_evidence.wait(2)
         return evidence_for(payload)
 
     def synthesize_answer_evaluation(self, payload):
@@ -79,8 +87,9 @@ class PilotE2ETests(unittest.TestCase):
             port=0, data_directory=Path(self.temp.name),
             web_directory=Path(__file__).resolve().parents[1] / "web",
         )
+        self.provider = FakePilotProvider()
         self.application = create_application(
-            config, provider=FakePilotProvider(), initial_pin="246810"
+            config, provider=self.provider, initial_pin="246810"
         )
         self.server = create_server(
             config, router=self.application.router, security=self.application.security
@@ -226,9 +235,11 @@ class PilotE2ETests(unittest.TestCase):
 
         evaluation_task = self.call(
             "POST", f"/api/v1/interview-cases/{case['id']}/ai/evaluate",
-            {"snapshotId": snapshot_id}, headers=headers,
+            {"snapshotId": snapshot_id},
+            headers={**headers, "X-Idempotency-Key": "excel-evaluation-1"},
         )
-        self.wait_task(evaluation_task["taskId"])
+        evaluation_result = self.wait_task(evaluation_task["taskId"])
+        self.assertEqual("EVALUATION_SYNTHESIS", evaluation_result["task"]["phase"])
         result = self.call(
             "GET", f"/api/v1/interview-cases/{case['id']}/ai/evaluation",
             headers=self.committee_headers(False),
@@ -297,11 +308,26 @@ class PilotE2ETests(unittest.TestCase):
         self.assertEqual("ANSWERS_IMPORTED", snapshot["refinedFlowStatus"])
         self.assertEqual("A concrete answer from HTML", snapshot["answers"][0]["answerText"])
 
+        self.provider.block_evidence = True
+        evaluation_headers = {**headers, "X-Idempotency-Key": "html-evaluation-1"}
         evaluation_task = self.call(
             "POST", f"/api/v1/interview-cases/{case['id']}/ai/evaluate",
-            {"snapshotId": snapshot["id"]}, headers=headers,
+            {"snapshotId": snapshot["id"]}, headers=evaluation_headers,
         )
-        self.wait_task(evaluation_task["taskId"])
+        self.assertTrue(self.provider.evidence_started.wait(1))
+        duplicate_task = self.call(
+            "POST", f"/api/v1/interview-cases/{case['id']}/ai/evaluate",
+            {"snapshotId": snapshot["id"]}, headers=evaluation_headers,
+        )
+        self.assertEqual(evaluation_task["taskId"], duplicate_task["taskId"])
+        running = self.call(
+            "GET", f"/api/v1/tasks/{evaluation_task['taskId']}",
+            headers=self.committee_headers(False),
+        )
+        self.assertEqual("EVIDENCE_ANALYSIS", running["task"]["phase"])
+        self.provider.release_evidence.set()
+        evaluation_result = self.wait_task(evaluation_task["taskId"])
+        self.assertEqual("EVALUATION_SYNTHESIS", evaluation_result["task"]["phase"])
         result = self.call(
             "GET", f"/api/v1/interview-cases/{case['id']}/ai/evaluation",
             headers=self.committee_headers(False),
