@@ -207,6 +207,54 @@ class GeminiProviderTests(unittest.TestCase):
         self.assertEqual("OBJECT", captured[0]["generationConfig"]["responseSchema"]["type"])
         self.assertEqual("OBJECT", captured[1]["generationConfig"]["responseSchema"]["type"])
 
+    def test_two_pass_response_schemas_declare_nested_required_fields(self):
+        captured = []
+
+        def opener(request, timeout):
+            captured.append(json.loads(request.data.decode("utf-8")))
+            return FakeResponse(gemini_response('{"status":"ok"}'))
+
+        provider = self.make_provider(opener, models=("gemini-3.6-flash",))
+        provider.analyze_answer_evidence({"answer": "evidence"})
+        provider.synthesize_answer_evaluation({"evidence": "validated"})
+
+        evidence_schema = captured[0]["generationConfig"]["responseSchema"]
+        evidence_answer = evidence_schema["properties"]["perAnswerEvidence"]["items"]
+        self.assertEqual(
+            [
+                "answerId", "questionId", "score", "evidenceStatus",
+                "reasoning", "evidenceFound", "concerns", "cvConsistency",
+            ],
+            evidence_answer["required"],
+        )
+        self.assertEqual("STRING", evidence_answer["properties"]["answerId"]["type"])
+        self.assertEqual(
+            [{"type": "INTEGER"}, {"type": "NULL"}],
+            evidence_answer["properties"]["score"]["anyOf"],
+        )
+        self.assertEqual(
+            ["competencyKey", "evidenceSummary", "evidenceStatus", "confidence"],
+            evidence_schema["properties"]["competencyEvidence"]["items"]["required"],
+        )
+
+        evaluation_schema = captured[1]["generationConfig"]["responseSchema"]
+        evaluation_answer = evaluation_schema["properties"]["perAnswerEvaluations"]["items"]
+        self.assertEqual(
+            [
+                "answerId", "questionId", "score", "evidenceStatus",
+                "reasoning", "evidenceFound", "concerns", "cvConsistency",
+            ],
+            evaluation_answer["required"],
+        )
+        self.assertEqual(
+            [{"type": "INTEGER"}, {"type": "NULL"}],
+            evaluation_answer["properties"]["score"]["anyOf"],
+        )
+        self.assertEqual(
+            ["competencyKey", "summary", "evidenceStatus", "confidence"],
+            evaluation_schema["properties"]["competencyEvaluations"]["items"]["required"],
+        )
+
     def test_rotates_after_network_error_and_empty_response(self):
         for failure in (urllib.error.URLError("offline"), "empty"):
             calls = []

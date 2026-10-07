@@ -134,8 +134,61 @@ _EVIDENCE_RESPONSE_SCHEMA = {
     "properties": {
         "schemaVersion": {"type": "STRING", "enum": ["answer-evidence.v1"]},
         "operation": {"type": "STRING", "enum": ["ANSWER_EVIDENCE_ANALYSIS"]},
-        "perAnswerEvidence": {"type": "ARRAY", "items": {"type": "OBJECT"}},
-        "competencyEvidence": {"type": "ARRAY", "items": {"type": "OBJECT"}},
+        "perAnswerEvidence": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "answerId": {"type": "STRING"},
+                    "questionId": {"type": "STRING"},
+                    "score": {
+                        "anyOf": [{"type": "INTEGER"}, {"type": "NULL"}],
+                    },
+                    "evidenceStatus": {
+                        "type": "STRING",
+                        "enum": [
+                            "VERIFIED", "PARTIALLY_VERIFIED", "UNVERIFIED",
+                            "CONFLICTING", "NOT_MET", "NOT_ASSESSED",
+                        ],
+                    },
+                    "reasoning": {"type": "STRING"},
+                    "evidenceFound": {"type": "ARRAY", "items": {"type": "STRING"}},
+                    "concerns": {"type": "ARRAY", "items": {"type": "STRING"}},
+                    "cvConsistency": {
+                        "type": "STRING",
+                        "enum": [
+                            "CONSISTENT", "PARTIALLY_CONSISTENT", "CONFLICTING",
+                            "NOT_ASSESSED",
+                        ],
+                    },
+                },
+                "required": [
+                    "answerId", "questionId", "score", "evidenceStatus",
+                    "reasoning", "evidenceFound", "concerns", "cvConsistency",
+                ],
+            },
+        },
+        "competencyEvidence": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "competencyKey": {"type": "STRING"},
+                    "evidenceSummary": {"type": "STRING"},
+                    "evidenceStatus": {
+                        "type": "STRING",
+                        "enum": [
+                            "VERIFIED", "PARTIALLY_VERIFIED", "UNVERIFIED",
+                            "CONFLICTING", "NOT_MET", "NOT_ASSESSED",
+                        ],
+                    },
+                    "confidence": {"type": "NUMBER"},
+                },
+                "required": [
+                    "competencyKey", "evidenceSummary", "evidenceStatus", "confidence",
+                ],
+            },
+        },
         "confidence": {"type": "NUMBER"},
         "limitations": {"type": "ARRAY", "items": {"type": "STRING"}},
     },
@@ -149,8 +202,61 @@ _EVALUATION_RESPONSE_SCHEMA = {
     "properties": {
         "schemaVersion": {"type": "STRING", "enum": ["answer-evaluation.v2"]},
         "operation": {"type": "STRING", "enum": ["ANSWER_EVALUATION"]},
-        "perAnswerEvaluations": {"type": "ARRAY", "items": {"type": "OBJECT"}},
-        "competencyEvaluations": {"type": "ARRAY", "items": {"type": "OBJECT"}},
+        "perAnswerEvaluations": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "answerId": {"type": "STRING"},
+                    "questionId": {"type": "STRING"},
+                    "score": {
+                        "anyOf": [{"type": "INTEGER"}, {"type": "NULL"}],
+                    },
+                    "evidenceStatus": {
+                        "type": "STRING",
+                        "enum": [
+                            "VERIFIED", "PARTIALLY_VERIFIED", "UNVERIFIED",
+                            "CONFLICTING", "NOT_MET", "NOT_ASSESSED",
+                        ],
+                    },
+                    "reasoning": {"type": "STRING"},
+                    "evidenceFound": {"type": "ARRAY", "items": {"type": "STRING"}},
+                    "concerns": {"type": "ARRAY", "items": {"type": "STRING"}},
+                    "cvConsistency": {
+                        "type": "STRING",
+                        "enum": [
+                            "CONSISTENT", "PARTIALLY_CONSISTENT", "CONFLICTING",
+                            "NOT_ASSESSED",
+                        ],
+                    },
+                },
+                "required": [
+                    "answerId", "questionId", "score", "evidenceStatus",
+                    "reasoning", "evidenceFound", "concerns", "cvConsistency",
+                ],
+            },
+        },
+        "competencyEvaluations": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "competencyKey": {"type": "STRING"},
+                    "summary": {"type": "STRING"},
+                    "evidenceStatus": {
+                        "type": "STRING",
+                        "enum": [
+                            "VERIFIED", "PARTIALLY_VERIFIED", "UNVERIFIED",
+                            "CONFLICTING", "NOT_MET", "NOT_ASSESSED",
+                        ],
+                    },
+                    "confidence": {"type": "NUMBER"},
+                },
+                "required": [
+                    "competencyKey", "summary", "evidenceStatus", "confidence",
+                ],
+            },
+        },
         "strengths": {"type": "ARRAY", "items": {"type": "STRING"}},
         "gaps": {"type": "ARRAY", "items": {"type": "STRING"}},
         "conflicts": {"type": "ARRAY", "items": {"type": "STRING"}},

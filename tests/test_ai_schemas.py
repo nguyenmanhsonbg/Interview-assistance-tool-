@@ -154,6 +154,30 @@ class AISchemaTests(unittest.TestCase):
         self.assertIn("ANSWER_EVIDENCE_ANALYSIS", evidence_prompt)
         self.assertIn("ANSWER_EVALUATION", synthesis_prompt)
 
+    def test_two_pass_prompts_declare_fixed_nested_output_contract(self):
+        from app.ai.prompts import PromptCatalog
+
+        catalog = PromptCatalog(Path(__file__).resolve().parents[1] / "prompts")
+        evidence_prompt = catalog.render("answer_evidence_analysis", {})
+        synthesis_prompt = catalog.render("answer_evaluation_synthesis", {})
+
+        self.assertIn("FIXED OUTPUT CONTRACT", evidence_prompt)
+        self.assertIn('"schemaVersion": "answer-evidence.v1"', evidence_prompt)
+        self.assertIn('"operation": "ANSWER_EVIDENCE_ANALYSIS"', evidence_prompt)
+        self.assertIn("`answerId` MUST be copied exactly from the supplied answer snapshot", evidence_prompt)
+        self.assertIn("exactly one `perAnswerEvidence` object for every supplied answer", evidence_prompt)
+        for field in ("answerId", "questionId", "score", "evidenceStatus", "reasoning", "evidenceFound", "concerns", "cvConsistency"):
+            self.assertIn(f'"{field}"', evidence_prompt)
+
+        self.assertIn("FIXED OUTPUT CONTRACT", synthesis_prompt)
+        self.assertIn('"schemaVersion": "answer-evaluation.v2"', synthesis_prompt)
+        self.assertIn('"operation": "ANSWER_EVALUATION"', synthesis_prompt)
+        self.assertIn("`answerId` MUST be copied exactly from the supplied answer snapshot", synthesis_prompt)
+        self.assertIn("exactly one `perAnswerEvaluations` object for every supplied answer", synthesis_prompt)
+        for field in ("answerId", "questionId", "score", "evidenceStatus", "reasoning", "evidenceFound", "concerns", "cvConsistency"):
+            self.assertIn(f'"{field}"', synthesis_prompt)
+        self.assertIn("Do not produce PASS/FAIL", synthesis_prompt)
+
     def test_question_generation_prompt_declares_fixed_top_level_output_contract(self):
         from app.ai.prompts import PromptCatalog
 
