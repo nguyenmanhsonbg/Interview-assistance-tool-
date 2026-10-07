@@ -749,18 +749,55 @@ async function renderDocuments(caseId) {
   });
 }
 
-async function waitForTask(taskId, host) {
+function taskStatusLabel(status) {
+  return {
+    PENDING: "Đang chờ AI bắt đầu xử lý",
+    RUNNING: "AI đang xử lý",
+    PENDING_RETRY: "AI đang chờ thử lại",
+    COMPLETED: "Đã hoàn tất",
+    FAILED: "Tác vụ thất bại",
+  }[status] || "Đang kiểm tra trạng thái";
+}
+
+function createTaskProgress(label) {
+  const panel = element("section", undefined, "task-progress notice");
+  const heading = element("div", label, "task-progress-heading");
+  const status = element("span", "Đang kiểm tra trạng thái", "task-progress-status");
+  status.setAttribute("aria-live", "polite");
+  heading.append(status);
+
+  const track = element("div", undefined, "task-progress-track");
+  track.setAttribute("role", "progressbar");
+  track.setAttribute("aria-label", "Tiến trình " + label);
+  track.setAttribute("aria-valuetext", "Đang kiểm tra trạng thái");
+  track.append(element("div", undefined, "task-progress-bar"));
+
+  panel.append(
+    heading,
+    track,
+    element("p", "Hệ thống đang xử lý. Không tạo lại tác vụ trong lúc này.", "muted"),
+  );
+  return {
+    panel,
+    update(task) {
+      const text = taskStatusLabel(task.status);
+      status.textContent = text;
+      track.setAttribute("aria-valuetext", text);
+    },
+  };
+}
+
+async function waitForTask(taskId, host, label = "Tác vụ AI") {
   if (taskPollers.has(taskId)) return taskPollers.get(taskId);
   const promise = (async () => {
     if (!getState().committeeSession) return null;
-    const panel = element("div", "Đang xử lý tác vụ AI…", "notice");
-    panel.setAttribute("aria-live", "polite");
-    if (host?.isConnected) host.append(panel);
+    const progress = createTaskProgress(label);
+    if (host?.isConnected) host.append(progress.panel);
     for (let attempt = 0; attempt < 150; attempt += 1) {
       if (!getState().committeeSession) return null;
       const result = await apiFetch("/api/v1/tasks/" + encodeURIComponent(taskId));
       const task = result.task;
-      panel.textContent = "Tác vụ AI: " + safeText(task.status);
+      progress.update(task);
       if (task.status === "COMPLETED") return result;
       if (task.status === "FAILED") throw new Error(task.errorCode || "Tác vụ AI thất bại");
       await new Promise((resolve) => window.setTimeout(resolve, 2000));
@@ -771,9 +808,9 @@ async function waitForTask(taskId, host) {
   return promise;
 }
 
-function resumeTask(caseId, step, taskId, host, refresh) {
+function resumeTask(caseId, step, taskId, host, refresh, label = "Tác vụ AI") {
   window.setTimeout(() => {
-    waitForTask(taskId, host)
+    waitForTask(taskId, host, label)
       .then((result) => {
         if (result && isActiveCaseStep(caseId, step)) return refresh();
         return null;
@@ -1013,8 +1050,9 @@ async function renderQuestions(caseId) {
       empty.append(element("h2", item.refinedFlowStatus === "QUESTIONS_GENERATING" ? "Đang sinh bộ câu hỏi" : "Chưa có bộ câu hỏi"));
       empty.append(element("p", item.refinedFlowStatus === "QUESTIONS_GENERATING" ? "Tác vụ đang được xử lý trên backend. Mở lại màn hình để kiểm tra, không tạo lại task nếu chưa có kết quả." : "Sinh câu hỏi dựa trên JD/CV đã xác nhận.", "muted"));
       const taskHost = element("div", undefined, "stack");
-      if (item.activeTaskId && item.refinedFlowStatus === "QUESTIONS_GENERATING") {
-        resumeTask(caseId, "questions", item.activeTaskId, taskHost, () => renderQuestions(caseId));
+      const taskRunning = Boolean(item.activeTaskId && item.refinedFlowStatus === "QUESTIONS_GENERATING");
+      if (taskRunning) {
+        resumeTask(caseId, "questions", item.activeTaskId, taskHost, () => renderQuestions(caseId), "AI đang tạo bộ câu hỏi");
       }
       const generate = button("Sinh bộ câu hỏi bằng AI", async () => {
         const task = await apiFetch("/api/v1/interview-cases/" + encodeURIComponent(caseId) + "/question-set", {
@@ -1022,7 +1060,7 @@ async function renderQuestions(caseId) {
           body: JSON.stringify({ operation: "GENERATE" }),
         });
         setState({ activeTaskId: task.taskId });
-        await waitForTask(task.taskId, taskHost);
+        await waitForTask(task.taskId, taskHost, "AI đang tạo bộ câu hỏi");
         if (!isActiveCaseStep(caseId, "questions")) return;
         await renderQuestions(caseId);
       }, "primary");
@@ -1030,8 +1068,12 @@ async function renderQuestions(caseId) {
       generate.disabled = !canGenerate;
       const manual = button("Tạo bản nháp thủ công", () => renderManualDraft(caseId), "secondary");
       manual.disabled = !canGenerate;
-      empty.append(generate, manual, taskHost);
-      if (!canGenerate) empty.append(element("p", "Cần xác nhận đủ JD và CV trước khi tạo Question Set.", "muted"));
+      if (taskRunning) {
+        empty.append(taskHost);
+      } else {
+        empty.append(generate, manual);
+        if (!canGenerate) empty.append(element("p", "Cần xác nhận đủ JD và CV trước khi tạo Question Set.", "muted"));
+      }
       view.append(empty);
       return view;
     }
@@ -1331,7 +1373,7 @@ async function renderAI(caseId) {
     }
     const taskHost = element("div", undefined, "stack");
     if (item.activeTaskId && item.refinedFlowStatus === "AI_ANALYZING" && !result) {
-      resumeTask(caseId, "ai", item.activeTaskId, taskHost, () => renderAI(caseId));
+      resumeTask(caseId, "ai", item.activeTaskId, taskHost, () => renderAI(caseId), "AI đang đánh giá ứng viên");
     }
     const action = button(result ? "Chạy đánh giá lại" : "Bắt đầu đánh giá bằng AI", async () => {
       const task = await apiFetch("/api/v1/interview-cases/" + encodeURIComponent(caseId) + "/ai/evaluate", {
@@ -1339,7 +1381,7 @@ async function renderAI(caseId) {
         body: JSON.stringify({ snapshotId: snapshot.id, forceRerun: Boolean(result) }),
       });
       setState({ activeTaskId: task.taskId });
-      await waitForTask(task.taskId, taskHost);
+      await waitForTask(task.taskId, taskHost, "AI đang đánh giá ứng viên");
       if (!isActiveCaseStep(caseId, "ai")) return;
       await renderAI(caseId);
     }, "primary");

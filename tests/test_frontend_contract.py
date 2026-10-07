@@ -123,6 +123,34 @@ class FrontendContractTests(unittest.TestCase):
         self.assertNotIn("Rubric chấm điểm", scripts)
         self.assertNotIn("function manualQuestions", scripts)
 
+    def test_question_generation_task_has_accessible_indeterminate_progress(self):
+        root = Path(__file__).resolve().parents[1] / "web"
+        styles = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.css"))
+        scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
+
+        for marker in (
+            "task-progress",
+            "task-progress-bar",
+            'role", "progressbar"',
+            'aria-valuetext',
+            "PENDING_RETRY",
+        ):
+            self.assertIn(marker, scripts)
+        self.assertIn("@keyframes task-progress", styles)
+
+    def test_question_generation_empty_state_is_task_first_while_running(self):
+        root = Path(__file__).resolve().parents[1] / "web"
+        scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
+
+        for marker in (
+            "const taskRunning = Boolean(",
+            '"Đang sinh bộ câu hỏi"',
+            "empty.append(taskHost);",
+            "if (taskRunning) {",
+            "empty.append(generate, manual);",
+        ):
+            self.assertIn(marker, scripts)
+
 
 if __name__ == "__main__":
     unittest.main()
