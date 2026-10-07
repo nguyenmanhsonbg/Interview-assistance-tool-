@@ -39,8 +39,8 @@
     },
     "questions": {
       "type": "array",
-      "minItems": 5,
-      "maxItems": 8,
+      "minItems": 9,
+      "maxItems": 9,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -50,7 +50,9 @@
           "text",
           "competencyKey",
           "sourceKind",
+          "questionCategory",
           "purpose",
+          "nextStepObjective",
           "questionType",
           "difficulty",
           "expectedEvidence",
@@ -60,13 +62,17 @@
         ],
         "properties": {
           "provisionalId": { "type": "string", "minLength": 1, "maxLength": 100 },
-          "displayOrder": { "type": "integer", "minimum": 1, "maximum": 8 },
+          "displayOrder": { "type": "integer", "minimum": 1, "maximum": 9 },
           "text": { "type": "string", "minLength": 1, "maxLength": 3000 },
           "competencyKey": { "type": "string", "minLength": 1, "maxLength": 100 },
           "sourceKind": {
             "enum": ["STANDARDIZED", "SITUATIONAL", "CV_VERIFICATION", "GAP_CONFLICT", "QUESTION_BANK", "MANUAL", "AI"]
           },
+          "questionCategory": {
+            "enum": ["FOUNDATION", "APPLICATION", "DEEP_DIVE"]
+          },
           "purpose": { "type": "string", "minLength": 1, "maxLength": 1000 },
+          "nextStepObjective": { "type": "string", "minLength": 1, "maxLength": 1000 },
           "questionType": { "enum": ["SHORT_TEXT", "LONG_TEXT", "SCENARIO"] },
           "difficulty": { "enum": ["EASY", "MEDIUM", "HARD"] },
           "expectedEvidence": { "type": "string", "minLength": 1, "maxLength": 2000 },

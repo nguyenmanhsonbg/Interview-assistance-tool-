@@ -3,7 +3,14 @@ import unittest
 from tests.support import MigratedDatabaseFixture
 
 
-def ai_payload(count=5):
+def ai_payload(count=9):
+    def category_for(index):
+        if index <= 3:
+            return "FOUNDATION", "STANDARDIZED"
+        if index <= 7:
+            return "APPLICATION", "SITUATIONAL"
+        return "DEEP_DIVE", "CV_VERIFICATION" if index == 8 else "GAP_CONFLICT"
+
     return {
         "schemaVersion": "question-generation.v1",
         "operation": "QUESTION_GENERATION",
@@ -18,7 +25,10 @@ def ai_payload(count=5):
             {
                 "provisionalId": f"q-{index}", "displayOrder": index,
                 "text": f"AI Question {index}", "competencyKey": "backend",
-                "sourceKind": "AI", "purpose": "Assess reasoning",
+                "sourceKind": category_for(index)[1],
+                "questionCategory": category_for(index)[0],
+                "purpose": "Assess reasoning",
+                "nextStepObjective": "Use the answer evidence in the evaluation rubric.",
                 "questionType": "SCENARIO", "difficulty": "MEDIUM",
                 "expectedEvidence": "Concrete example",
                 "rubric": {f"score{score}": f"Level {score}" for score in range(5)},
@@ -50,11 +60,16 @@ class QuestionGenerationTests(MigratedDatabaseFixture, unittest.TestCase):
         from app.services.question_service import QuestionService
 
         result = QuestionService(self.database).materialize_generated(
-            self.case["id"], ai_payload(5)
+            self.case["id"], ai_payload()
         )
 
         self.assertEqual("GENERATED", result["status"])
-        self.assertEqual(5, len(result["questions"]))
+        self.assertEqual(9, len(result["questions"]))
+        self.assertEqual(
+            {"FOUNDATION": 3, "APPLICATION": 4, "DEEP_DIVE": 2},
+            {category: sum(q["questionCategory"] == category for q in result["questions"])
+             for category in ("FOUNDATION", "APPLICATION", "DEEP_DIVE")},
+        )
         with self.database.connection() as connection:
             case_status = connection.execute(
                 "SELECT status FROM interview_cases WHERE id=?", (self.case["id"],)
@@ -65,7 +80,7 @@ class QuestionGenerationTests(MigratedDatabaseFixture, unittest.TestCase):
         from app.domain.errors import ValidationError
         from app.services.question_service import QuestionService
 
-        invalid = ai_payload(4)
+        invalid = ai_payload(8)
         with self.assertRaises(ValidationError):
             QuestionService(self.database).materialize_generated(self.case["id"], invalid)
         with self.database.connection() as connection:

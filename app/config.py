@@ -10,6 +10,7 @@ DEFAULT_GEMINI_MODELS = (
     "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
 )
+BUNDLED_PDF_TEXT_EXTRACTOR = Path("tools/poppler/Library/bin/pdftotext.exe")
 
 
 def _read_dotenv(path: Path) -> dict[str, str]:
@@ -60,6 +61,8 @@ class AppConfig:
     gemini_api_key: str | None = field(default=None, repr=False)
     gemini_models: tuple[str, ...] = DEFAULT_GEMINI_MODELS
     gemini_timeout_seconds: float = 45.0
+    pdf_text_extractor_path: Path | None = field(default=None, repr=False)
+    pdf_text_extractor_timeout_seconds: float = 30.0
 
     def __post_init__(self) -> None:
         if self.host != "127.0.0.1":
@@ -72,19 +75,38 @@ class AppConfig:
             raise ValueError("Body limits must be positive")
         if self.gemini_timeout_seconds <= 0:
             raise ValueError("GEMINI_CV_PARSE_TIMEOUT_MS must be positive")
+        if self.pdf_text_extractor_path is not None:
+            extractor_path = Path(self.pdf_text_extractor_path)
+            if not extractor_path.is_absolute():
+                raise ValueError("PDF_TEXT_EXTRACTOR_PATH must be absolute")
+            object.__setattr__(self, "pdf_text_extractor_path", extractor_path)
+        if self.pdf_text_extractor_timeout_seconds <= 0:
+            raise ValueError("PDF_TEXT_EXTRACTOR_TIMEOUT_SECONDS must be positive")
         models = tuple(model.strip() for model in self.gemini_models if model.strip())
         object.__setattr__(self, "gemini_models", models or DEFAULT_GEMINI_MODELS)
 
     @classmethod
     def from_environment(cls, *, env_file: Path | None = None) -> "AppConfig":
-        dotenv = _read_dotenv(
+        dotenv_path = (
             Path(env_file)
             if env_file is not None
             else Path(__file__).resolve().parents[1] / ".env"
         )
+        dotenv = _read_dotenv(dotenv_path)
 
         def get(name: str, default: str | None = None) -> str | None:
             return os.environ[name] if name in os.environ else dotenv.get(name, default)
+
+        pdf_extractor_value = get("PDF_TEXT_EXTRACTOR_PATH")
+        pdf_extractor_path = None
+        if pdf_extractor_value:
+            pdf_extractor_path = Path(pdf_extractor_value)
+            if not pdf_extractor_path.is_absolute():
+                pdf_extractor_path = (dotenv_path.parent / pdf_extractor_path).resolve()
+        else:
+            bundled_pdf_extractor = (dotenv_path.parent / BUNDLED_PDF_TEXT_EXTRACTOR).resolve()
+            if bundled_pdf_extractor.is_file():
+                pdf_extractor_path = bundled_pdf_extractor
 
         return cls(
             host=get("APP_HOST", "127.0.0.1"),
@@ -116,6 +138,10 @@ class AppConfig:
                 get("GEMINI_CV_PARSE_TIMEOUT_MS", "45000")
             )
             / 1000.0,
+            pdf_text_extractor_path=pdf_extractor_path,
+            pdf_text_extractor_timeout_seconds=float(
+                get("PDF_TEXT_EXTRACTOR_TIMEOUT_SECONDS", "30")
+            ),
         )
 
     @property

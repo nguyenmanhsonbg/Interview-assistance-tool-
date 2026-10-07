@@ -318,6 +318,8 @@ Manual text request:
 
 - Response 201: document summary, extraction status, versionNo.
 - Audit: DOCUMENT_IMPORTED hoặc DOCUMENT_VERSION_CREATED.
+- Với PDF có extractor được cấu hình và extraction thành công, hệ thống tự động
+  đặt `isAiEligible=true` và ghi audit `DOCUMENT_TEXT_AUTO_CONFIRMED`.
 
 GET /api/v1/interview-cases/{caseId}/documents
 

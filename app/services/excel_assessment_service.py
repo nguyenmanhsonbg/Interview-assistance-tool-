@@ -46,8 +46,8 @@ class ExcelAssessmentService:
             raise ResourceNotFound("Question Set not found")
         if question_set["status"] not in {"GENERATED", "APPROVED"}:
             raise StateConflict("Question Set is not ready for Excel export")
-        if not 5 <= len(question_set["questions"]) <= 8:
-            raise ValidationError("Question Set must contain 5 to 8 questions")
+        if len(question_set["questions"]) != 9:
+            raise ValidationError("Question Set must contain exactly 9 questions")
         metadata = {
             "format_version": WORKBOOK_FORMAT_VERSION,
             "case_id": case_id,
@@ -63,7 +63,9 @@ class ExcelAssessmentService:
                 "questionText": question["questionText"],
                 "competencyKey": question["competencyKey"],
                 "sourceKind": question["sourceKind"],
+                "questionCategory": question["questionCategory"],
                 "purpose": question["purpose"],
+                "nextStepObjective": question["nextStepObjective"],
                 "questionType": question["questionType"],
                 "difficulty": question["difficulty"],
                 "expectedEvidence": question["expectedEvidence"],

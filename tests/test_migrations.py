@@ -21,7 +21,7 @@ class MigrationTests(unittest.TestCase):
         from app.migrations import MigrationRunner
 
         runner = MigrationRunner(self.database, self.migrations)
-        self.assertEqual([1, 2], runner.apply_all())
+        self.assertEqual([1, 2, 3], runner.apply_all())
         self.assertEqual([], runner.apply_all())
 
         with self.database.connection() as connection:
@@ -47,9 +47,10 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(20, len(tables))
         self.assertIn("interview_briefs", tables)
         self.assertEqual(3, len(triggers))
-        self.assertEqual("8", settings["assessment.default_question_count"])
+        self.assertEqual("9", settings["assessment.default_question_count"])
+        self.assertEqual("9", settings["assessment.max_question_count"])
         self.assertEqual("MANUAL_ONLY", settings["retention.mode"])
-        self.assertEqual([1, 2], [row[0] for row in versions])
+        self.assertEqual([1, 2, 3], [row[0] for row in versions])
 
     def test_question_and_answer_lock_triggers_enforce_immutable_snapshots(self):
         from app.migrations import MigrationRunner
@@ -68,7 +69,7 @@ class MigrationTests(unittest.TestCase):
             connection.execute(
                 "INSERT INTO question_sets(id, interview_case_id) VALUES ('set', 'case')"
             )
-            for number in range(1, 9):
+            for number in range(1, 10):
                 connection.execute(
                     """INSERT INTO questions(
                         id, question_set_id, display_order, question_text,
@@ -81,7 +82,7 @@ class MigrationTests(unittest.TestCase):
                     """INSERT INTO questions(
                         id, question_set_id, display_order, question_text,
                         competency_key, source_kind, purpose, expected_evidence
-                    ) VALUES ('q9', 'set', 8, 'Ninth', 'skill', 'MANUAL', 'purpose', 'evidence')"""
+                    ) VALUES ('q10', 'set', 10, 'Tenth', 'skill', 'MANUAL', 'purpose', 'evidence')"""
                 )
             connection.execute(
                 """INSERT INTO assessment_attempts(

@@ -60,7 +60,11 @@ class InterviewCaseRepository(RepositoryBase):
     def get(self, case_id: str) -> dict[str, Any]:
         row = self.query_one(
             """SELECT ic.*, c.candidate_code, c.full_name,
-                      j.job_code, j.position_title, j.target_level
+                      j.job_code, j.position_title, j.target_level,
+                      (SELECT t.id FROM ai_tasks t
+                       WHERE t.interview_case_id = ic.id
+                         AND t.status IN ('PENDING', 'PENDING_RETRY', 'RUNNING')
+                       ORDER BY t.created_at DESC, t.id DESC LIMIT 1) AS active_task_id
                FROM interview_cases ic
                JOIN candidates c ON c.id = ic.candidate_id
                JOIN jobs j ON j.id = ic.job_id
@@ -79,7 +83,11 @@ class InterviewCaseRepository(RepositoryBase):
 
     def list(self, status: str | None = None) -> list[dict[str, Any]]:
         sql = """SELECT ic.*, c.candidate_code, c.full_name,
-                        j.job_code, j.position_title, j.target_level
+                        j.job_code, j.position_title, j.target_level,
+                        (SELECT t.id FROM ai_tasks t
+                         WHERE t.interview_case_id = ic.id
+                           AND t.status IN ('PENDING', 'PENDING_RETRY', 'RUNNING')
+                         ORDER BY t.created_at DESC, t.id DESC LIMIT 1) AS active_task_id
                  FROM interview_cases ic
                  JOIN candidates c ON c.id = ic.candidate_id
                  JOIN jobs j ON j.id = ic.job_id"""
@@ -98,6 +106,7 @@ def _case_dict(row: sqlite3.Row, members: list[sqlite3.Row]) -> dict[str, Any]:
         "jobId": row["job_id"],
         "status": row["status"],
         "refinedFlowStatus": row["refined_flow_status"] or row["status"],
+        "activeTaskId": row["active_task_id"],
         "scheduledAt": row["scheduled_at"],
         "assessmentDurationSeconds": row["assessment_duration_seconds"],
         "allowIncompleteSubmit": bool(row["allow_incomplete_submit"]),

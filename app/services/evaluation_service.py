@@ -326,6 +326,10 @@ class EvaluationService:
                     "displayOrder": question["displayOrder"],
                     "questionText": sanitize_text(question["questionText"], known_names=known_names),
                     "competencyKey": sanitize_text(question["competencyKey"], known_names=known_names),
+                    "questionCategory": question["questionCategory"],
+                    "nextStepObjective": sanitize_text(
+                        question["nextStepObjective"], known_names=known_names
+                    ),
                     "expectedEvidence": sanitize_text(question["expectedEvidence"], known_names=known_names),
                     "rubric": {
                         key: sanitize_text(value, known_names=known_names)

@@ -88,34 +88,73 @@ class GeminiProviderTests(unittest.TestCase):
             "You are a safe JSON-only assistant for the supervised interview tool.",
             body["systemInstruction"]["parts"][0]["text"],
         )
-        self.assertEqual(0.7, body["generationConfig"]["temperature"])
+        self.assertEqual(0.2, body["generationConfig"]["temperature"])
+        self.assertEqual(
+            "application/json", body["generationConfig"]["responseMimeType"]
+        )
+        response_schema = body["generationConfig"]["responseSchema"]
+        self.assertEqual("OBJECT", response_schema["type"])
+        self.assertEqual(
+            [
+                "schemaVersion",
+                "operation",
+                "competencyMatrix",
+                "questions",
+                "gaps",
+                "conflicts",
+                "estimatedDurationSeconds",
+                "confidence",
+                "limitations",
+            ],
+            response_schema["required"],
+        )
+        self.assertEqual("STRING", response_schema["properties"]["schemaVersion"]["type"])
+        self.assertEqual("STRING", response_schema["properties"]["operation"]["type"])
+        self.assertEqual(
+            ["question-generation.v1"],
+            response_schema["properties"]["schemaVersion"]["enum"],
+        )
+        self.assertEqual(
+            ["QUESTION_GENERATION"],
+            response_schema["properties"]["operation"]["enum"],
+        )
+        self.assertEqual(
+            ["SHORT_TEXT", "LONG_TEXT", "SCENARIO"],
+            response_schema["properties"]["questions"]["items"]["properties"]["questionType"]["enum"],
+        )
+        self.assertIn("questions", response_schema["properties"])
 
-    def test_accepts_json_fence_and_rejects_invalid_json_without_second_model(self):
+    def test_accepts_json_fence_and_commentary_before_json(self):
         calls = []
 
         def fenced_opener(request, timeout):
             calls.append(request)
-            return FakeResponse(gemini_response('```json\n{"status":"ok"}\n```'))
+            if len(calls) == 1:
+                return FakeResponse(
+                    gemini_response('Here is the JSON:\n```json\n{"status":"ok"}\n```')
+                )
+            return FakeResponse(gemini_response('{"status":"second"}'))
 
         self.assertEqual(
             {"status": "ok"},
             self.make_provider(fenced_opener).evaluate_answers({}),
         )
-
-        invalid_calls = []
-
-        def invalid_opener(request, timeout):
-            invalid_calls.append(request)
-            return FakeResponse(gemini_response("not json"))
-
-        from app.ai.provider import ProviderError
-
-        with self.assertRaises(ProviderError) as caught:
-            self.make_provider(invalid_opener).evaluate_answers({})
-        self.assertEqual("INVALID_JSON", caught.exception.code)
-        self.assertFalse(caught.exception.retryable)
-        self.assertEqual(1, len(invalid_calls))
         self.assertEqual(1, len(calls))
+
+    def test_retries_malformed_json_on_next_model(self):
+        calls = []
+
+        def invalid_then_valid_opener(request, timeout):
+            calls.append(request)
+            if len(calls) == 1:
+                return FakeResponse(gemini_response("not json"))
+            return FakeResponse(gemini_response('{"status":"ok"}'))
+
+        self.assertEqual(
+            {"status": "ok"},
+            self.make_provider(invalid_then_valid_opener).evaluate_answers({}),
+        )
+        self.assertEqual(2, len(calls))
 
     def test_rotates_after_retryable_http_error_without_leaking_key(self):
         calls = []

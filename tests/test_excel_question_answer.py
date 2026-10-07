@@ -6,7 +6,7 @@ from xml.etree import ElementTree
 
 def _metadata() -> dict[str, str]:
     return {
-        "format_version": "question-answer.v1",
+        "format_version": "question-answer.v2",
         "case_id": "case-1",
         "question_set_id": "set-1",
         "question_set_version": "2",
@@ -21,8 +21,10 @@ def _question(number: int, *, answer: str = "", answered: bool = False) -> dict:
         "displayOrder": number,
         "questionText": f"Question {number}\nwith context",
         "competencyKey": "backend",
-        "sourceKind": "AI",
+        "sourceKind": "SITUATIONAL" if number <= 7 else "CV_VERIFICATION",
+        "questionCategory": "FOUNDATION" if number <= 3 else "APPLICATION" if number <= 7 else "DEEP_DIVE",
         "purpose": "Validate evidence",
+        "nextStepObjective": "Use the answer evidence in the evaluation rubric.",
         "questionType": "LONG_TEXT",
         "difficulty": "MEDIUM",
         "expectedEvidence": "Context, action, outcome",
@@ -35,7 +37,7 @@ def _question(number: int, *, answer: str = "", answered: bool = False) -> dict:
 
 
 def _valid_questions() -> list[dict]:
-    return [_question(number) for number in range(1, 6)]
+    return [_question(number) for number in range(1, 10)]
 
 
 def _replace_entry(raw: bytes, name: str, replacement: bytes) -> bytes:
@@ -75,14 +77,14 @@ class ExcelQuestionAnswerTests(unittest.TestCase):
         )
 
         wrong_version = _metadata()
-        wrong_version["format_version"] = "question-answer.v2"
+        wrong_version["format_version"] = "question-answer.v1"
         with self.assertRaises(ValidationError):
             import_question_answer_workbook(
                 export_question_answer_workbook(wrong_version, _valid_questions())
             )
         with self.assertRaises(ValidationError):
             import_question_answer_workbook(
-                export_question_answer_workbook(_metadata(), _valid_questions()[:4])
+                export_question_answer_workbook(_metadata(), _valid_questions()[:8])
             )
 
     def test_rejects_formula_cells_and_unsafe_package_entries(self):

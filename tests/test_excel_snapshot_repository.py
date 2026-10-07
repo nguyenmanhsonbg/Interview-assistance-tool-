@@ -11,8 +11,10 @@ def _question(number: int, text: str | None = None) -> dict:
         "displayOrder": number,
         "questionText": text or f"Question {number}",
         "competencyKey": "backend",
-        "sourceKind": "AI",
+        "sourceKind": "SITUATIONAL" if number <= 4 else "CV_VERIFICATION",
+        "questionCategory": "FOUNDATION" if number <= 3 else "APPLICATION" if number <= 4 else "DEEP_DIVE",
         "purpose": "Validate evidence",
+        "nextStepObjective": "Use the answer evidence in the evaluation rubric.",
         "questionType": "LONG_TEXT",
         "difficulty": "MEDIUM",
         "expectedEvidence": "Context and outcome",
@@ -49,7 +51,7 @@ class ExcelSnapshotRepositoryTests(MigratedDatabaseFixture, unittest.TestCase):
             "assessment_snapshot_questions",
             "assessment_snapshot_answers",
         }.issubset(tables))
-        self.assertEqual([1, 2], versions)
+        self.assertEqual([1, 2, 3], versions)
 
     def test_snapshot_round_trip_preserves_edited_questions_and_answer_hashes(self):
         from app.repositories.assessment_snapshots import AssessmentSnapshotRepository

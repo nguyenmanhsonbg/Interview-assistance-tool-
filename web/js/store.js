@@ -4,6 +4,8 @@ const state = {
   committeeSession: null,
   currentCaseId: null,
   currentSnapshotId: null,
+  activeTaskId: null,
+  pendingCaseCreation: null,
 };
 
 export function getState() {
@@ -19,4 +21,6 @@ export function clearSensitiveState() {
   state.committeeSession = null;
   state.currentCaseId = null;
   state.currentSnapshotId = null;
+  state.activeTaskId = null;
+  state.pendingCaseCreation = null;
 }

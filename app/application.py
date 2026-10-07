@@ -165,5 +165,7 @@ def create_application(
         application.submit_task,
         ai_provider_name=provider_name,
         ai_model_name=model_name,
+        pdf_text_extractor_path=config.pdf_text_extractor_path,
+        pdf_text_extractor_timeout_seconds=config.pdf_text_extractor_timeout_seconds,
     ).register(router)
     return application

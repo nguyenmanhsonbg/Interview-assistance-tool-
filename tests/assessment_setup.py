@@ -27,6 +27,6 @@ def create_approved_case(test_case):
             (case["id"],),
         ).fetchone()[0]
     questions = QuestionService(test_case.database)
-    question_set = questions.create_manual_draft(case["id"], valid_questions(5))
+    question_set = questions.create_manual_draft(case["id"], valid_questions())
     question_set = questions.approve(question_set["id"], member_id)
     return case, question_set, member_id

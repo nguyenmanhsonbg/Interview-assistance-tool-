@@ -88,6 +88,12 @@ class AITaskTests(MigratedDatabaseFixture, unittest.TestCase):
         )
         task = service.request(self.case["id"], idempotency_key="metadata-key")
 
+        self.assertEqual(9, task["inputManifest"]["questionPolicy"]["maxQuestions"])
+        self.assertEqual(
+            {"foundation": 3, "application": 4, "deepDive": 2},
+            task["inputManifest"]["questionPolicy"]["distribution"],
+        )
+
         with self.database.connection() as connection:
             row = connection.execute(
                 "SELECT provider, model FROM ai_tasks WHERE id=?", (task["id"],)

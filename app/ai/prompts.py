@@ -7,6 +7,11 @@ from typing import Any
 from app.domain.errors import ValidationError
 
 
+RETRY_REPAIR_INSTRUCTION = (
+    "Return one corrected JSON object that strictly matches the requested schema."
+)
+
+
 _PROMPTS = {
     "question_generation": ("question_generation_prompt.md", "question-generation.v1"),
     "answer_evaluation": ("answer_evaluation_prompt.md", "answer-evaluation.v1"),
@@ -31,5 +36,17 @@ class PromptCatalog:
         except KeyError as error:
             raise ValidationError(f"Unknown prompt key: {key}") from error
         template = (self.root / filename).read_text(encoding="utf-8")
-        serialized = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-        return f"{template.rstrip()}\n\nBEGIN_UNTRUSTED_INPUT\n{serialized}\nEND_UNTRUSTED_INPUT\n"
+        repair_instruction = payload.get("repairInstruction")
+        input_payload = payload
+        if repair_instruction == RETRY_REPAIR_INSTRUCTION:
+            input_payload = dict(payload)
+            input_payload.pop("repairInstruction")
+        serialized = json.dumps(input_payload, ensure_ascii=False, separators=(",", ":"))
+        rendered = template.rstrip()
+        if repair_instruction == RETRY_REPAIR_INSTRUCTION:
+            rendered += (
+                "\n\nRETRY_REPAIR_INSTRUCTION\n"
+                f"{RETRY_REPAIR_INSTRUCTION}\n"
+                "END_RETRY_REPAIR_INSTRUCTION"
+            )
+        return f"{rendered}\n\nBEGIN_UNTRUSTED_INPUT\n{serialized}\nEND_UNTRUSTED_INPUT\n"

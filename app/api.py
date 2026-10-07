@@ -35,12 +35,19 @@ class APIController:
         *,
         ai_provider_name: str | None = None,
         ai_model_name: str | None = None,
+        pdf_text_extractor_path=None,
+        pdf_text_extractor_timeout_seconds: float = 30.0,
     ) -> None:
         self.database = database
         self.security = security
         self.submit_task = submit_task
         self.cases = CaseService(database)
-        self.documents = DocumentService(database, data_root)
+        self.documents = DocumentService(
+            database,
+            data_root,
+            pdf_text_extractor_path=pdf_text_extractor_path,
+            pdf_text_extractor_timeout_seconds=pdf_text_extractor_timeout_seconds,
+        )
         self.excel_assessments = ExcelAssessmentService(database)
         self.questions = QuestionService(database)
         self.question_generation = QuestionGenerationService(

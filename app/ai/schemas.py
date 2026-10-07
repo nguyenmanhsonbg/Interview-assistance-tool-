@@ -123,9 +123,37 @@ def _is_type(value: Any, expected: str) -> bool:
 
 
 def _validate_question_rules(payload: dict[str, Any]) -> None:
-    orders = [question["displayOrder"] for question in payload["questions"]]
-    if orders != list(range(1, len(orders) + 1)):
-        raise ValidationError("AI question displayOrder values must be contiguous from 1")
+    questions = payload["questions"]
+    if len(questions) != 9:
+        raise ValidationError("AI Question Set must contain exactly 9 questions")
+    orders = [question["displayOrder"] for question in questions]
+    if orders != list(range(1, 10)):
+        raise ValidationError("AI question displayOrder values must be contiguous from 1 to 9")
+    counts = {
+        category: sum(question["questionCategory"] == category for question in questions)
+        for category in ("FOUNDATION", "APPLICATION", "DEEP_DIVE")
+    }
+    if counts != {"FOUNDATION": 3, "APPLICATION": 4, "DEEP_DIVE": 2}:
+        raise ValidationError(
+            "AI Question Set must use the FOUNDATION/APPLICATION/DEEP_DIVE distribution 3/4/2"
+        )
+    expected_sources = {
+        "FOUNDATION": {"STANDARDIZED"},
+        "APPLICATION": {"SITUATIONAL"},
+        "DEEP_DIVE": {"CV_VERIFICATION", "GAP_CONFLICT"},
+    }
+    for question in questions:
+        if question["sourceKind"] not in expected_sources[question["questionCategory"]]:
+            raise ValidationError("AI question sourceKind does not match questionCategory")
+    deep_dive_sources = [
+        question["sourceKind"]
+        for question in questions
+        if question["questionCategory"] == "DEEP_DIVE"
+    ]
+    if sorted(deep_dive_sources) != ["CV_VERIFICATION", "GAP_CONFLICT"]:
+        raise ValidationError(
+            "AI DEEP_DIVE questions must contain one CV_VERIFICATION and one GAP_CONFLICT question"
+        )
 
 
 def _validate_evaluation_rules(payload: dict[str, Any]) -> None:

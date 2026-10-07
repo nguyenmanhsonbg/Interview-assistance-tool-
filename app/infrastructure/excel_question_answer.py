@@ -10,7 +10,7 @@ from xml.etree import ElementTree
 from app.domain.errors import ValidationError
 
 
-WORKBOOK_FORMAT_VERSION = "question-answer.v1"
+WORKBOOK_FORMAT_VERSION = "question-answer.v2"
 METADATA_FIELDS = (
     "format_version",
     "case_id",
@@ -25,7 +25,9 @@ QUESTION_HEADERS = (
     "question_text",
     "competency_key",
     "source_kind",
+    "question_category",
     "purpose",
+    "next_step_objective",
     "question_type",
     "difficulty",
     "expected_evidence",
@@ -60,7 +62,9 @@ _QUESTION_FIELDS = (
     ("questionText", "question_text"),
     ("competencyKey", "competency_key"),
     ("sourceKind", "source_kind"),
+    ("questionCategory", "question_category"),
     ("purpose", "purpose"),
+    ("nextStepObjective", "next_step_objective"),
     ("questionType", "question_type"),
     ("difficulty", "difficulty"),
     ("expectedEvidence", "expected_evidence"),
@@ -175,7 +179,9 @@ def _normalize_question(question: Mapping[str, Any]) -> dict[str, Any]:
             "questionText": question["questionText"],
             "competencyKey": question["competencyKey"],
             "sourceKind": question["sourceKind"],
+            "questionCategory": question["questionCategory"],
             "purpose": question["purpose"],
+            "nextStepObjective": question["nextStepObjective"],
             "questionType": question["questionType"],
             "difficulty": question["difficulty"],
             "expectedEvidence": question["expectedEvidence"],
@@ -192,34 +198,45 @@ def _normalize_question(question: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _validate_questions(questions: Sequence[Mapping[str, Any]]) -> None:
-    if not 5 <= len(questions) <= 8:
-        raise ValidationError("Workbook must contain 5 to 8 questions")
+    if len(questions) != 9:
+        raise ValidationError("Workbook must contain exactly 9 questions")
     normalized = [_normalize_question(question) for question in questions]
     ids = [item["questionId"] for item in normalized]
     orders = [item["displayOrder"] for item in normalized]
     if len(ids) != len(set(ids)) or len(orders) != len(set(orders)):
         raise ValidationError("Workbook question IDs and display orders must be unique")
-    if orders != list(range(1, len(orders) + 1)):
-        raise ValidationError("Workbook display orders must be contiguous from 1")
+    if orders != list(range(1, 10)):
+        raise ValidationError("Workbook display orders must be contiguous from 1 to 9")
+    categories = [item["questionCategory"] for item in normalized]
+    counts = {
+        category: categories.count(category)
+        for category in ("FOUNDATION", "APPLICATION", "DEEP_DIVE")
+    }
+    if counts != {"FOUNDATION": 3, "APPLICATION": 4, "DEEP_DIVE": 2}:
+        raise ValidationError(
+            "Workbook must use the FOUNDATION/APPLICATION/DEEP_DIVE distribution 3/4/2"
+        )
 
 
 def _validate_question(question: Mapping[str, Any]) -> None:
     for field in (
-        "questionId", "questionText", "competencyKey", "sourceKind", "purpose",
-        "questionType", "difficulty", "expectedEvidence",
+        "questionId", "questionText", "competencyKey", "sourceKind", "questionCategory",
+        "purpose", "nextStepObjective", "questionType", "difficulty", "expectedEvidence",
     ):
         value = question[field]
         if not isinstance(value, str) or not value.strip() or len(value) > MAX_CELL_CHARS:
             raise ValidationError(f"Workbook question {field} is invalid")
     if question["sourceKind"] not in _SOURCE_KINDS:
         raise ValidationError("Workbook source_kind is invalid")
+    if question["questionCategory"] not in {"FOUNDATION", "APPLICATION", "DEEP_DIVE"}:
+        raise ValidationError("Workbook question_category is invalid")
     if question["questionType"] not in _QUESTION_TYPES:
         raise ValidationError("Workbook question_type is invalid")
     if question["difficulty"] not in _DIFFICULTIES:
         raise ValidationError("Workbook difficulty is invalid")
     if isinstance(question["displayOrder"], bool) or not isinstance(question["displayOrder"], int):
         raise ValidationError("Workbook display_order is invalid")
-    if not 1 <= question["displayOrder"] <= 8:
+    if not 1 <= question["displayOrder"] <= 9:
         raise ValidationError("Workbook display_order is invalid")
     if not isinstance(question["isRequired"], bool):
         raise ValidationError("Workbook is_required is invalid")
@@ -373,7 +390,9 @@ def _parse_questions(rows: list[list[str]]) -> tuple[list[dict[str, Any]], tuple
                 "questionText": values["question_text"],
                 "competencyKey": values["competency_key"],
                 "sourceKind": values["source_kind"],
+                "questionCategory": values["question_category"],
                 "purpose": values["purpose"],
+                "nextStepObjective": values["next_step_objective"],
                 "questionType": values["question_type"],
                 "difficulty": values["difficulty"],
                 "expectedEvidence": values["expected_evidence"],

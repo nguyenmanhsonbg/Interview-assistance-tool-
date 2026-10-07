@@ -49,7 +49,9 @@ class QuestionService:
                 "questionText": item["text"],
                 "competencyKey": item["competencyKey"],
                 "sourceKind": item["sourceKind"],
+                "questionCategory": item["questionCategory"],
                 "purpose": item["purpose"],
+                "nextStepObjective": item["nextStepObjective"],
                 "questionType": item["questionType"],
                 "difficulty": item["difficulty"],
                 "expectedEvidence": item["expectedEvidence"],
@@ -127,8 +129,8 @@ class QuestionService:
                 "SELECT COUNT(*) FROM questions WHERE question_set_id=?",
                 (question_set_id,),
             ).fetchone()[0]
-            if not 5 <= count <= 8:
-                raise ValidationError("Question Set must contain 5 to 8 questions")
+            if count != 9:
+                raise ValidationError("Question Set must contain exactly 9 questions")
             connection.execute(
                 """UPDATE question_sets SET status='APPROVED', approved_by_member_id=?,
                    approved_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),
@@ -231,16 +233,16 @@ class QuestionService:
 
 
 def _validate_questions(questions: Any) -> list[dict[str, Any]]:
-    if not isinstance(questions, list) or not 5 <= len(questions) <= 8:
-        raise ValidationError("Question Set must contain 5 to 8 questions")
+    if not isinstance(questions, list) or len(questions) != 9:
+        raise ValidationError("Question Set must contain exactly 9 questions")
     normalized: list[dict[str, Any]] = []
     orders: set[int] = set()
     for question in questions:
         if not isinstance(question, dict):
             raise ValidationError("Question must be an object")
         order = question.get("displayOrder")
-        if not isinstance(order, int) or isinstance(order, bool) or order in orders or not 1 <= order <= 8:
-            raise ValidationError("displayOrder must be unique and between 1 and 8")
+        if not isinstance(order, int) or isinstance(order, bool) or order in orders or not 1 <= order <= 9:
+            raise ValidationError("displayOrder must be unique and between 1 and 9")
         orders.add(order)
         rubric = question.get("rubric")
         if not isinstance(rubric, dict) or any(
@@ -256,7 +258,13 @@ def _validate_questions(questions: Any) -> list[dict[str, Any]]:
                 "questionText": require_text(question.get("questionText"), "questionText"),
                 "competencyKey": require_text(question.get("competencyKey"), "competencyKey"),
                 "sourceKind": question.get("sourceKind", "MANUAL"),
+                "questionCategory": require_text(
+                    question.get("questionCategory"), "questionCategory"
+                ),
                 "purpose": require_text(question.get("purpose"), "purpose"),
+                "nextStepObjective": require_text(
+                    question.get("nextStepObjective"), "nextStepObjective"
+                ),
                 "questionType": question.get("questionType", "SHORT_TEXT"),
                 "difficulty": question.get("difficulty", "MEDIUM"),
                 "expectedEvidence": require_text(question.get("expectedEvidence"), "expectedEvidence"),
@@ -265,7 +273,21 @@ def _validate_questions(questions: Any) -> list[dict[str, Any]]:
                 "estimatedSeconds": question.get("estimatedSeconds"),
             }
         )
-    return sorted(normalized, key=lambda item: item["displayOrder"])
+    normalized = sorted(normalized, key=lambda item: item["displayOrder"])
+    if [item["displayOrder"] for item in normalized] != list(range(1, 10)):
+        raise ValidationError("displayOrder values must be contiguous from 1 to 9")
+    categories = [item["questionCategory"] for item in normalized]
+    if any(category not in {"FOUNDATION", "APPLICATION", "DEEP_DIVE"} for category in categories):
+        raise ValidationError("questionCategory is invalid")
+    counts = {
+        category: categories.count(category)
+        for category in ("FOUNDATION", "APPLICATION", "DEEP_DIVE")
+    }
+    if counts != {"FOUNDATION": 3, "APPLICATION": 4, "DEEP_DIVE": 2}:
+        raise ValidationError(
+            "Question Set must use the FOUNDATION/APPLICATION/DEEP_DIVE distribution 3/4/2"
+        )
+    return normalized
 
 
 def _insert_questions(
@@ -277,13 +299,15 @@ def _insert_questions(
         connection.execute(
             """INSERT INTO questions(
                 id, question_set_id, display_order, question_text, competency_key,
-                source_kind, purpose, question_type, difficulty, expected_evidence,
-                rubric_json, is_required, estimated_seconds
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                source_kind, question_category, purpose, next_step_objective,
+                question_type, difficulty, expected_evidence, rubric_json,
+                is_required, estimated_seconds
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 question["id"], question_set_id, question["displayOrder"],
                 question["questionText"], question["competencyKey"],
-                question["sourceKind"], question["purpose"], question["questionType"],
+                question["sourceKind"], question["questionCategory"], question["purpose"],
+                question["nextStepObjective"], question["questionType"],
                 question["difficulty"], question["expectedEvidence"],
                 json.dumps(question["rubric"], ensure_ascii=False, separators=(",", ":")),
                 int(question["isRequired"]), question["estimatedSeconds"],

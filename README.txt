@@ -24,6 +24,8 @@ Set these environment variables before starting the portable app:
   GEMINI_API_KEY=<your-gemini-api-key>
   GEMINI_CV_PARSE_MODELS=gemini-3.6-flash,gemini-3.5-flash,gemini-3.5-flash-lite
   GEMINI_CV_PARSE_TIMEOUT_MS=45000
+  PDF_TEXT_EXTRACTOR_PATH=tools\poppler\Library\bin\pdftotext.exe
+  PDF_TEXT_EXTRACTOR_TIMEOUT_SECONDS=30
 
 Alternatively, create a .env file in the project root with these values.
 Windows environment variables override values from .env. The .env file is
@@ -41,7 +43,7 @@ Active Excel assessment flow
 The current Committee flow is:
   1. Create a case and enter/confirm JD and CV text.
   2. Generate or manually create the question set.
-  3. Review/approve questions and export the canonical question-answer.v1 .xlsx workbook.
+  3. Review/approve exactly 9 questions (3 Foundation, 4 Application, 2 Deep Dive) and export the canonical question-answer.v2 .xlsx workbook.
   4. Fill the answer cells in that workbook and import the same .xlsx file.
   5. Start AI evaluation and review the read-only answer-evaluation.v2 result.
 

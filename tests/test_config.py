@@ -112,5 +112,62 @@ class AppConfigTests(unittest.TestCase):
             self.assertEqual("generic", overridden.ai_provider)
             self.assertEqual("environment-key", overridden.gemini_api_key)
 
+    def test_reads_optional_pdf_text_extractor_configuration(self):
+        from app.config import AppConfig
+
+        with tempfile.TemporaryDirectory() as temporary:
+            env_file = Path(temporary) / ".env"
+            env_file.write_text(
+                "PDF_TEXT_EXTRACTOR_PATH=C:/tools/pdftotext.exe\n"
+                "PDF_TEXT_EXTRACTOR_TIMEOUT_SECONDS=12.5\n",
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {"LOCALAPPDATA": os.getcwd()}, clear=True):
+                config = AppConfig.from_environment(env_file=env_file)
+
+        self.assertEqual(Path("C:/tools/pdftotext.exe"), config.pdf_text_extractor_path)
+        self.assertEqual(12.5, config.pdf_text_extractor_timeout_seconds)
+
+    def test_resolves_repo_local_pdf_extractor_relative_to_env_file(self):
+        from app.config import AppConfig
+
+        with tempfile.TemporaryDirectory() as temporary:
+            env_root = Path(temporary)
+            env_file = env_root / ".env"
+            env_file.write_text(
+                "PDF_TEXT_EXTRACTOR_PATH=tools/poppler/Library/bin/pdftotext.exe\n",
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {"LOCALAPPDATA": os.getcwd()}, clear=True):
+                config = AppConfig.from_environment(env_file=env_file)
+
+        self.assertEqual(
+            (env_root / "tools/poppler/Library/bin/pdftotext.exe").resolve(),
+            config.pdf_text_extractor_path,
+        )
+
+    def test_discovers_bundled_pdf_extractor_when_setting_is_missing(self):
+        from app.config import AppConfig
+
+        with tempfile.TemporaryDirectory() as temporary:
+            env_root = Path(temporary)
+            bundled_extractor = (
+                env_root / "tools/poppler/Library/bin/pdftotext.exe"
+            )
+            bundled_extractor.parent.mkdir(parents=True)
+            bundled_extractor.write_bytes(b"placeholder")
+            env_file = env_root / ".env"
+            env_file.write_text("AI_PROVIDER=generic\n", encoding="utf-8")
+            with patch.dict(os.environ, {"LOCALAPPDATA": os.getcwd()}, clear=True):
+                config = AppConfig.from_environment(env_file=env_file)
+
+        self.assertEqual(bundled_extractor.resolve(), config.pdf_text_extractor_path)
+
+    def test_rejects_relative_pdf_text_extractor_path(self):
+        from app.config import AppConfig
+
+        with self.assertRaises(ValueError):
+            AppConfig(pdf_text_extractor_path=Path("tools/pdftotext.exe"))
+
 if __name__ == "__main__":
     unittest.main()

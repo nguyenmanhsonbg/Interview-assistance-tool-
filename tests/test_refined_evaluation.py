@@ -65,6 +65,8 @@ class RefinedEvaluationTests(MigratedDatabaseFixture, unittest.TestCase):
         )
         self.assertNotIn("interviewBrief", provider.payload)
         self.assertNotIn("recommendedLiveQuestions", provider.payload)
+        self.assertEqual("FOUNDATION", provider.payload["questions"][0]["questionCategory"])
+        self.assertIn("nextStepObjective", provider.payload["questions"][0])
         self.assertEqual("AI_EVALUATED", service.refined_status(self.case["id"]))
 
     def test_v2_result_is_versioned_on_force_rerun(self):

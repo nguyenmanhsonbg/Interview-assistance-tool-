@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import sqlite3
+import subprocess
 import unicodedata
 import uuid
 import zipfile
@@ -24,10 +25,21 @@ DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.docu
 
 
 class DocumentService:
-    def __init__(self, database: Database, data_root: Path) -> None:
+    def __init__(
+        self,
+        database: Database,
+        data_root: Path,
+        *,
+        pdf_text_extractor_path: Path | None = None,
+        pdf_text_extractor_timeout_seconds: float = 30.0,
+    ) -> None:
         self.database = database
         self.repository = DocumentRepository(database)
         self.storage = FileStorage(data_root)
+        self.pdf_text_extractor_path = (
+            Path(pdf_text_extractor_path) if pdf_text_extractor_path else None
+        )
+        self.pdf_text_extractor_timeout_seconds = pdf_text_extractor_timeout_seconds
 
     def import_manual_text(
         self, case_id: str, document_type: str, text: str
@@ -82,7 +94,12 @@ class DocumentService:
         )
         self.storage.write_atomic(relative, raw)
         try:
-            extracted = _extract(extension, raw)
+            extracted = _extract(
+                extension,
+                raw,
+                pdf_text_extractor_path=self.pdf_text_extractor_path,
+                pdf_text_extractor_timeout_seconds=self.pdf_text_extractor_timeout_seconds,
+            )
             status = "SUCCEEDED"
         except (
             UnicodeDecodeError,
@@ -112,6 +129,13 @@ class DocumentService:
             if stored.is_file():
                 stored.unlink()
             raise
+        if status == "SUCCEEDED" and extension == ".pdf":
+            result = self._confirm_locked(
+                result["id"],
+                result["contentSha256"],
+                actor_type="SYSTEM",
+                audit_action="DOCUMENT_TEXT_AUTO_CONFIRMED",
+            )
         if status == "FAILED":
             with self.database.transaction() as connection:
                 connection.execute(
@@ -138,9 +162,21 @@ class DocumentService:
         if existing is None:
             raise ResourceNotFound("Document not found")
         with case_mutation_lock(existing["interview_case_id"]):
-            return self._confirm_locked(document_id, expected_hash)
+            return self._confirm_locked(
+                document_id,
+                expected_hash,
+                actor_type="COMMITTEE",
+                audit_action="DOCUMENT_TEXT_CONFIRMED",
+            )
 
-    def _confirm_locked(self, document_id: str, expected_hash: str) -> dict[str, Any]:
+    def _confirm_locked(
+        self,
+        document_id: str,
+        expected_hash: str,
+        *,
+        actor_type: str,
+        audit_action: str,
+    ) -> dict[str, Any]:
         with self.database.transaction() as connection:
             row = connection.execute(
                 """SELECT d.*, ic.status case_status, aa.status attempt_status
@@ -185,8 +221,8 @@ class DocumentService:
             )
             append_audit(
                 connection,
-                actor_type="COMMITTEE",
-                action="DOCUMENT_TEXT_CONFIRMED",
+                actor_type=actor_type,
+                action=audit_action,
                 entity_type="DOCUMENT",
                 entity_id=document_id,
                 metadata={"documentType": row["document_type"]},
@@ -325,11 +361,24 @@ def _validate_media(extension: str, mime_type: str, raw: bytes) -> None:
         raise UnsupportedMediaType("MIME type does not match document format")
     if extension == ".docx" and not raw.startswith(b"PK"):
         raise UnsupportedMediaType("DOCX signature is invalid")
-    if extension == ".pdf" and not raw.startswith(b"%PDF-"):
+    if extension == ".pdf" and not _has_pdf_signature(raw):
         raise UnsupportedMediaType("PDF signature is invalid")
 
 
-def _extract(extension: str, raw: bytes) -> str:
+def _has_pdf_signature(raw: bytes) -> bool:
+    header_offset = raw[:64].find(b"%PDF-")
+    if header_offset < 0:
+        return False
+    return not raw[:header_offset].strip(b" \t\r\n")
+
+
+def _extract(
+    extension: str,
+    raw: bytes,
+    *,
+    pdf_text_extractor_path: Path | None = None,
+    pdf_text_extractor_timeout_seconds: float = 30.0,
+) -> str:
     if extension in {".txt", ".md", ".markdown"}:
         text = raw.decode("utf-8-sig", errors="strict")
         return _canonicalize(text)
@@ -348,8 +397,42 @@ def _extract(extension: str, raw: bytes) -> str:
             text = "\n".join(node.text or "" for node in root.iter(namespace))
             return _canonicalize(text)
     if extension == ".pdf":
-        raise ValueError("PDF extraction requires manual text or approved pdftotext")
+        return _extract_pdf(
+            raw,
+            pdf_text_extractor_path,
+            pdf_text_extractor_timeout_seconds,
+        )
     raise UnsupportedMediaType("Unsupported document format")
+
+
+def _extract_pdf(
+    raw: bytes,
+    extractor_path: Path | None,
+    timeout_seconds: float,
+) -> str:
+    if extractor_path is None or not extractor_path.is_absolute():
+        raise ValueError("Approved PDF text extractor is not configured")
+    if not extractor_path.is_file():
+        raise ValueError("Approved PDF text extractor is unavailable")
+    try:
+        completed = subprocess.run(
+            [str(extractor_path), "-layout", "-", "-"],
+            input=raw,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout_seconds,
+            check=False,
+            shell=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValueError("PDF text extraction failed") from error
+    if completed.returncode != 0 or len(completed.stdout) > MAX_TEXT_CODEPOINTS * 4:
+        raise ValueError("PDF text extraction failed")
+    try:
+        text = completed.stdout.decode("utf-8-sig", errors="strict")
+    except UnicodeDecodeError as error:
+        raise ValueError("PDF extractor output is not valid UTF-8") from error
+    return _canonicalize(text)
 
 
 def _canonicalize(text: str) -> str:

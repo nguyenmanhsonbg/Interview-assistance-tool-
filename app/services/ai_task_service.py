@@ -5,6 +5,7 @@ import uuid
 from typing import Any
 
 from app.ai.provider import AIProvider, ProviderError
+from app.ai.prompts import RETRY_REPAIR_INSTRUCTION
 from app.ai.schemas import SchemaRegistry
 from app.database import Database
 from app.domain.errors import ResourceNotFound, StateConflict, ValidationError
@@ -75,9 +76,7 @@ class AITaskService:
             payload = payload_override or task["inputManifest"].get("payload", task["inputManifest"])
             if task["status"] == "PENDING_RETRY":
                 payload = dict(payload)
-                payload["repairInstruction"] = (
-                    "Return one corrected JSON object that strictly matches the requested schema."
-                )
+                payload["repairInstruction"] = RETRY_REPAIR_INSTRUCTION
             if task["taskType"] == "GENERATE_QUESTIONS":
                 output = provider.generate_questions(payload)
                 operation = result_type = "QUESTION_GENERATION"

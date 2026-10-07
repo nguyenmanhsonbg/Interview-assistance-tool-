@@ -14,14 +14,19 @@ function requestHeaders(options, method, contentType) {
   const state = getState();
   const headers = { ...(options.headers || {}) };
   if (contentType && !headers["Content-Type"]) headers["Content-Type"] = contentType;
-  if (state.committeeSession && !headers["X-Candidate-Token"]) {
+  if (state.committeeSession && !headers["X-Committee-Session"]) {
     headers["X-Committee-Session"] = state.committeeSession;
   }
   if (MUTATION_METHODS.has(method) && state.startupToken) {
     headers["X-Startup-Token"] = state.startupToken;
-    headers["X-Idempotency-Key"] ||= headers["Idempotency-Key"] || crypto.randomUUID();
+    headers["X-Idempotency-Key"] ||= headers["Idempotency-Key"] || makeIdempotencyKey();
   }
   return headers;
+}
+
+function makeIdempotencyKey() {
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  return "ui-" + Date.now() + "-" + Math.random().toString(16).slice(2);
 }
 
 async function parseResponse(response) {
@@ -35,6 +40,9 @@ async function parseResponse(response) {
 
 function throwResponseError(response, payload) {
   if (response.ok && (!payload || payload.success !== false)) return;
+  if ((response.status === 401 || response.status === 403) && getState().committeeSession) {
+    window.dispatchEvent(new CustomEvent("committee-session-expired"));
+  }
   const error = payload?.error || { code: "NETWORK_ERROR", message: "Không thể hoàn tất yêu cầu" };
   throw new ApiError(error.code, error.message, response.status);
 }

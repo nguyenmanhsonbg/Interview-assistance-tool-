@@ -51,10 +51,10 @@ class AssessmentSnapshotRepository(RepositoryBase):
             connection.execute(
                 """INSERT INTO assessment_snapshot_questions(
                     assessment_snapshot_id, question_id, display_order,
-                    question_text, competency_key, source_kind, purpose,
-                    question_type, difficulty, expected_evidence, rubric_json,
-                    is_required, estimated_seconds
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    question_text, competency_key, source_kind, question_category,
+                    purpose, next_step_objective, question_type, difficulty,
+                    expected_evidence, rubric_json, is_required, estimated_seconds
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     snapshot_id,
                     question["questionId"],
@@ -62,7 +62,9 @@ class AssessmentSnapshotRepository(RepositoryBase):
                     question["questionText"],
                     question["competencyKey"],
                     question["sourceKind"],
+                    question["questionCategory"],
                     question["purpose"],
+                    question["nextStepObjective"],
                     question["questionType"],
                     question["difficulty"],
                     question["expectedEvidence"],
@@ -178,7 +180,9 @@ def _question_dict(row: sqlite3.Row) -> dict[str, Any]:
         "questionText": row["question_text"],
         "competencyKey": row["competency_key"],
         "sourceKind": row["source_kind"],
+        "questionCategory": row["question_category"],
         "purpose": row["purpose"],
+        "nextStepObjective": row["next_step_objective"],
         "questionType": row["question_type"],
         "difficulty": row["difficulty"],
         "expectedEvidence": row["expected_evidence"],

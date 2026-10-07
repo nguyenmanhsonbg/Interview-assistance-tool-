@@ -58,7 +58,8 @@ class QuestionGenerationService:
             "jobId": case["job_id"], "jobUpdatedAt": case["job_updated_at"],
             "documents": [dict(row) for row in documents],
             "questionPolicy": question_policy or {
-                "maxQuestions": 8, "durationSeconds": 900,
+                "questionCount": 9, "maxQuestions": 9, "durationSeconds": 900,
+                "distribution": {"foundation": 3, "application": 4, "deepDive": 2},
                 "standardized": True, "situational": True,
                 "cvVerification": True, "gapConflict": True,
             },

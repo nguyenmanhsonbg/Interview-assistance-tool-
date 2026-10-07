@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import socket
 import time
 import urllib.error
@@ -26,6 +27,103 @@ _OPERATION_CONFIG = {
     "GENERATE_QUESTIONS": "question_generation",
     "EVALUATE_ASSESSMENT": "answer_evaluation",
     "SUGGEST_FOLLOW_UP": "follow_up_question",
+}
+_OPERATION_TEMPERATURE = {
+    "GENERATE_QUESTIONS": 0.2,
+    "EVALUATE_ASSESSMENT": 0.1,
+    "SUGGEST_FOLLOW_UP": 0.2,
+}
+_QUESTION_GENERATION_RESPONSE_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "schemaVersion": {"type": "STRING", "enum": ["question-generation.v1"]},
+        "operation": {"type": "STRING", "enum": ["QUESTION_GENERATION"]},
+        "competencyMatrix": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "key": {"type": "STRING"},
+                    "name": {"type": "STRING"},
+                    "required": {"type": "BOOLEAN"},
+                    "priority": {
+                        "type": "STRING",
+                        "enum": ["REQUIRED", "HIGH", "MEDIUM", "LOW"],
+                    },
+                    "jdEvidence": {"type": "STRING"},
+                    "cvEvidence": {"type": "STRING"},
+                    "gap": {"type": "STRING"},
+                    "conflict": {"type": "STRING"},
+                },
+                "required": [
+                    "key", "name", "required", "priority", "jdEvidence",
+                    "cvEvidence", "gap", "conflict",
+                ],
+            },
+        },
+        "questions": {
+            "type": "ARRAY",
+            "items": {
+                "type": "OBJECT",
+                "properties": {
+                    "provisionalId": {"type": "STRING"},
+                    "displayOrder": {"type": "INTEGER"},
+                    "text": {"type": "STRING"},
+                    "competencyKey": {"type": "STRING"},
+                    "sourceKind": {
+                        "type": "STRING",
+                        "enum": [
+                            "STANDARDIZED", "SITUATIONAL", "CV_VERIFICATION",
+                            "GAP_CONFLICT", "QUESTION_BANK", "MANUAL", "AI",
+                        ],
+                    },
+                    "questionCategory": {
+                        "type": "STRING",
+                        "enum": ["FOUNDATION", "APPLICATION", "DEEP_DIVE"],
+                    },
+                    "purpose": {"type": "STRING"},
+                    "nextStepObjective": {"type": "STRING"},
+                    "questionType": {
+                        "type": "STRING",
+                        "enum": ["SHORT_TEXT", "LONG_TEXT", "SCENARIO"],
+                    },
+                    "difficulty": {
+                        "type": "STRING",
+                        "enum": ["EASY", "MEDIUM", "HARD"],
+                    },
+                    "expectedEvidence": {"type": "STRING"},
+                    "rubric": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "score0": {"type": "STRING"},
+                            "score1": {"type": "STRING"},
+                            "score2": {"type": "STRING"},
+                            "score3": {"type": "STRING"},
+                            "score4": {"type": "STRING"},
+                        },
+                        "required": ["score0", "score1", "score2", "score3", "score4"],
+                    },
+                    "isRequired": {"type": "BOOLEAN"},
+                    "estimatedSeconds": {"type": "INTEGER"},
+                },
+                "required": [
+                    "provisionalId", "displayOrder", "text", "competencyKey",
+                    "sourceKind", "questionCategory", "purpose", "nextStepObjective",
+                    "questionType", "difficulty", "expectedEvidence", "rubric",
+                    "isRequired", "estimatedSeconds",
+                ],
+            },
+        },
+        "gaps": {"type": "ARRAY", "items": {"type": "STRING"}},
+        "conflicts": {"type": "ARRAY", "items": {"type": "STRING"}},
+        "estimatedDurationSeconds": {"type": "INTEGER"},
+        "confidence": {"type": "NUMBER"},
+        "limitations": {"type": "ARRAY", "items": {"type": "STRING"}},
+    },
+    "required": [
+        "schemaVersion", "operation", "competencyMatrix", "questions", "gaps",
+        "conflicts", "estimatedDurationSeconds", "confidence", "limitations",
+    ],
 }
 _SYSTEM_INSTRUCTION = (
     "You are a safe JSON-only assistant for the supervised interview tool."
@@ -101,11 +199,17 @@ class GeminiAIProvider:
             ) from error
 
         prompt = self.prompts.render(prompt_key, payload)
+        generation_config: dict[str, Any] = {
+            "temperature": _OPERATION_TEMPERATURE[operation],
+            "responseMimeType": "application/json",
+        }
+        if operation == "GENERATE_QUESTIONS":
+            generation_config["responseSchema"] = _QUESTION_GENERATION_RESPONSE_SCHEMA
         body = json.dumps(
             {
                 "contents": [{"role": "user", "parts": [{"text": prompt}]}],
                 "systemInstruction": {"parts": [{"text": _SYSTEM_INSTRUCTION}]},
-                "generationConfig": {"temperature": 0.7},
+                "generationConfig": generation_config,
             },
             ensure_ascii=False,
             separators=(",", ":"),
@@ -207,15 +311,29 @@ class GeminiAIProvider:
 
     @staticmethod
     def _parse_output(text: str) -> dict[str, Any]:
-        if text.startswith("```") and text.endswith("```"):
-            lines = text.splitlines()
-            text = "\n".join(lines[1:-1]).strip()
+        candidate = text.strip()
+        fenced = re.search(r"```(?:json)?\s*(.*?)\s*```", candidate, flags=re.IGNORECASE | re.DOTALL)
+        if fenced is not None:
+            candidate = fenced.group(1).strip()
         try:
-            value = json.loads(text)
+            value = json.loads(candidate)
         except json.JSONDecodeError as error:
-            raise ProviderError(
-                "Gemini response was not valid JSON", code="INVALID_JSON", retryable=False
-            ) from error
+            decoder = json.JSONDecoder()
+            start = candidate.find("{")
+            if start < 0:
+                raise ProviderError(
+                    "Gemini response was not valid JSON", code="INVALID_JSON", retryable=True
+                ) from error
+            try:
+                value, end = decoder.raw_decode(candidate[start:])
+            except json.JSONDecodeError:
+                raise ProviderError(
+                    "Gemini response was not valid JSON", code="INVALID_JSON", retryable=True
+                ) from error
+            if candidate[start + end :].strip():
+                raise ProviderError(
+                    "Gemini response was not valid JSON", code="INVALID_JSON", retryable=True
+                ) from error
         if not isinstance(value, dict):
             raise ProviderError(
                 "Gemini response must be a JSON object",

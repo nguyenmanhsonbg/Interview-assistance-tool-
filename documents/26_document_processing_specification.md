@@ -18,7 +18,7 @@
 | TXT | Có | Python open/read_text |
 | Markdown | Có | Text đọc như plain text |
 | DOCX | Có | zipfile + xml.etree.ElementTree |
-| PDF text | Fallback | Paste extracted text hoặc approved pdftotext |
+| PDF text | Fallback | Paste extracted text hoặc approved pdftotext; extraction thành công được auto-confirm |
 | PDF scan | Không | OCR ngoài MVP |
 | DOC | Không | Reject binary legacy Word |
 | DOCM | Không | Reject macro-enabled file |
@@ -57,7 +57,9 @@ Receive JSON
 → Audit event
 ~~~
 
-Không gửi file trực tiếp tới AI. Chỉ extracted_text đã làm sạch và được HĐCM confirm mới có is_ai_eligible=1.
+Không gửi file trực tiếp tới AI. Chỉ extracted_text đã làm sạch mới có `is_ai_eligible=1`.
+PDF được trích xuất thành công bằng approved extractor sẽ được hệ thống tự động xác nhận;
+manual text vẫn cần HĐCM confirm.
 
 ## 4. File validation
 
@@ -68,14 +70,14 @@ Allowlist:
 - .txt: text/plain hoặc user-supplied text mode.
 - .md/.markdown: text/markdown hoặc text/plain.
 - .docx: application/vnd.openxmlformats-officedocument.wordprocessingml.document.
-- .pdf: application/pdf nhưng chỉ fallback/pdftotext.
+- .pdf: application/pdf; dùng approved `pdftotext` nếu đã cấu hình, nếu không thì fallback thủ công.
 
 Không tin MIME client đơn độc; phải kiểm tra extension, MIME hợp lý và signature.
 
 ### Magic/signature
 
 - DOCX: ZIP signature PK và required entry [Content_Types].xml; reject nếu có vbaProject.bin.
-- PDF: bắt đầu bằng %PDF-; vẫn không đảm bảo extract native.
+- PDF: chứa header `%PDF-` trong 64 byte đầu, chỉ cho phép whitespace ASCII đứng trước header; vẫn không đảm bảo extract native.
 - TXT/Markdown: không có magic tin cậy; giới hạn extension, decode và content.
 - DOCM/DOC: reject trước extraction.
 
@@ -141,12 +143,14 @@ Malformed XML/ZIP trả parse failure, không retry vô hạn.
 
 ### Optional approved pdftotext
 
-- Executable phải được đơn vị phê duyệt và đóng gói cùng pilot hoặc cấu hình absolute allowlisted path.
+- Executable phải được đơn vị phê duyệt và đóng gói cùng pilot trong `tools/poppler`, hoặc cấu hình bằng absolute allowlisted path.
 - Gọi bằng subprocess với shell=False, argument list, timeout và output size limit.
 - Không nhận executable path từ user.
 - Kiểm tra exit code và output encoding.
 - Không OCR scan PDF trong core MVP.
 - Nếu executable thiếu/lỗi, chuyển manual paste fallback.
+- Nếu extractor trả text hợp lệ, hệ thống tự động xác nhận document và ghi audit
+  `DOCUMENT_TEXT_AUTO_CONFIRMED`; không yêu cầu gọi endpoint confirm riêng cho PDF đó.
 
 ## 9. Manual paste fallback
 
@@ -188,6 +192,7 @@ Parse không retry tự động nếu input không đổi. User replace file/tex
 - DOCUMENT_PARSE_SUCCEEDED.
 - DOCUMENT_PARSE_FAILED.
 - DOCUMENT_TEXT_CONFIRMED.
+- DOCUMENT_TEXT_AUTO_CONFIRMED.
 - DOCUMENT_VERSION_CREATED.
 - DOCUMENT_REJECTED_UNSUPPORTED.
 - DOCUMENT_CLEANUP_FAILED.

@@ -22,7 +22,7 @@ class CandidateAccessTests(MigratedDatabaseFixture, unittest.TestCase):
         view = self.service.candidate_view(
             self.started["id"], self.started["candidateToken"]
         )
-        self.assertEqual(5, len(view["questions"]))
+        self.assertEqual(9, len(view["questions"]))
         self.assertEqual(
             {"id", "displayOrder", "questionText", "questionType", "answerText", "isAnswered", "saveRevision"},
             set(view["questions"][0]),

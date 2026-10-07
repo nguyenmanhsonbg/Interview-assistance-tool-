@@ -35,7 +35,7 @@ class AssessmentWorkflowTests(MigratedDatabaseFixture, unittest.TestCase):
         )
         self.assertEqual(first["submittedAt"], second["submittedAt"])
         self.assertEqual(0, first["answeredCount"])
-        self.assertEqual(5, first["totalCount"])
+        self.assertEqual(9, first["totalCount"])
         with self.assertRaises(Unauthenticated):
             self.service.candidate_view(attempt["id"], attempt["candidateToken"])
         with self.assertRaises(Unauthenticated):

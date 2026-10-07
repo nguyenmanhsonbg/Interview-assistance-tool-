@@ -48,7 +48,7 @@ if ($pthLines -notcontains "..") {
     Add-Content -LiteralPath $pth.FullName -Value ".."
 }
 
-foreach ($directory in @("app", "web", "migrations", "prompts", "schemas")) {
+foreach ($directory in @("app", "web", "migrations", "prompts", "schemas", "tools")) {
     Copy-Item -LiteralPath (Join-Path $repoRoot $directory) -Destination (Join-Path $bundleRoot $directory) -Recurse
 }
 foreach ($file in @("main.py", "start.bat", "README.txt")) {

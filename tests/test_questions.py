@@ -3,14 +3,23 @@ import unittest
 from tests.support import MigratedDatabaseFixture
 
 
-def valid_questions(count=5):
+def valid_questions(count=9):
+    def category_for(index):
+        if index <= 3:
+            return "FOUNDATION"
+        if index <= 7:
+            return "APPLICATION"
+        return "DEEP_DIVE"
+
     return [
         {
             "displayOrder": index,
             "questionText": f"Question {index}",
             "competencyKey": "backend",
             "sourceKind": "MANUAL",
+            "questionCategory": category_for(index),
             "purpose": "Assess backend reasoning",
+            "nextStepObjective": "Use the answer evidence in the evaluation rubric.",
             "questionType": "SCENARIO",
             "difficulty": "MEDIUM",
             "expectedEvidence": "Specific decisions and evidence",
@@ -45,9 +54,9 @@ class QuestionServiceTests(MigratedDatabaseFixture, unittest.TestCase):
 
         service = QuestionService(self.database)
         question_set = service.create_manual_draft(
-            self.case["id"], valid_questions(5), duration_seconds=900
+            self.case["id"], valid_questions(), duration_seconds=900
         )
-        edited = valid_questions(5)
+        edited = valid_questions()
         edited[0]["questionText"] = "Edited question"
         service.update_draft(question_set["id"], edited)
         member_id = self._lead_id()
@@ -56,7 +65,7 @@ class QuestionServiceTests(MigratedDatabaseFixture, unittest.TestCase):
         self.assertEqual("APPROVED", approved["status"])
         self.assertEqual("Edited question", approved["questions"][0]["questionText"])
         with self.assertRaises(StateConflict):
-            service.update_draft(question_set["id"], valid_questions(5))
+            service.update_draft(question_set["id"], valid_questions())
         with self.database.connection() as connection:
             action = connection.execute(
                 "SELECT action FROM audit_logs WHERE entity_id=? ORDER BY created_at DESC LIMIT 1",
@@ -69,14 +78,14 @@ class QuestionServiceTests(MigratedDatabaseFixture, unittest.TestCase):
         from app.services.question_service import QuestionService
 
         service = QuestionService(self.database)
-        for count in (4, 9):
+        for count in (8, 10):
             with self.assertRaises(ValidationError):
                 service.create_manual_draft(self.case["id"], valid_questions(count))
         with self.assertRaises(ValidationError):
             service.create_manual_draft(
-                self.case["id"], valid_questions(5), duration_seconds=599
+                self.case["id"], valid_questions(), duration_seconds=599
             )
-        invalid = valid_questions(5)
+        invalid = valid_questions()
         invalid[0]["expectedEvidence"] = ""
         with self.assertRaises(ValidationError):
             service.create_manual_draft(self.case["id"], invalid)
