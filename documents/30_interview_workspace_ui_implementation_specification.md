@@ -114,6 +114,14 @@ Plan hiện nêu endpoint đọc kết quả AI current và đọc snapshot theo
 
 Ngôn ngữ mặc định: tiếng Việt. Giữ nguyên thuật ngữ cần thiết như JD, CV, Gemini, rubric. Tránh hiển thị raw enum làm nhãn chính. Những enum chưa biết phải có nhãn an toàn và chặn action phụ thuộc, không suy đoán quyền thao tác.
 
+## 0A. Approved active assessment bridge
+
+This addendum supersedes the earlier Excel-only wording for the active assessment bridge. The implemented primary flow is:
+
+`Question Set approved on machine B -> export candidate-html.v1 -> candidate works offline on machine A -> response HTML downloaded -> machine B imports response -> immutable snapshot -> AI evaluation.`
+
+Machine B remains localhost-only. Machine A does not connect to the app, does not receive a token or internal data, and only opens the self-contained file. Excel export/import remains the visible operational fallback. The accepted protection target is ordinary operational errors rather than deliberate tampering.
+
 ## 5. Visual design system
 
 ### 5.1. Phong cách

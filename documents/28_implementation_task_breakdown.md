@@ -427,6 +427,18 @@ Một task hoàn tất khi:
 - CI runner Windows.
 - Multi-machine/server mode.
 
+## 0A. Active implementation order: offline HTML bridge
+
+After Question Set approval and before AI evaluation, implement the offline transfer tasks below. The existing server-side Candidate Mode/autosave/submit tasks remain a separately supported alternative capability and must not be mixed into the HTML package contract.
+
+| Task | Scope | Exit evidence |
+| --- | --- | --- |
+| HTML-001 | Candidate-safe `candidate-html.v1` codec/runtime | file:// package works offline; no external resource; safe text rendering |
+| HTML-002 | Question Package export and response import | HTML_IMPORT immutable snapshot, provenance, audit, idempotency/versioning |
+| HTML-003 | Committee API and evaluation provenance | binary endpoints, auth/size/error contract, canonical source fields |
+| HTML-004 | Committee UI transfer flow | HTML primary; Excel explicitly labeled fallback |
+| HTML-005 | Acceptance/package smoke | machine A/B operator flow and portable Windows run verified |
+
 ## 18. Acceptance criteria
 
 1. Có Batch A–J đúng phạm vi yêu cầu.

@@ -641,6 +641,21 @@ Mutations phải có X-Startup-Token, session/candidate token và Idempotency-Ke
 - Bulk import/export.
 - API v2 khi server mode được hỗ trợ.
 
+## 0A. Active offline HTML candidate transfer
+
+The approved active assessment bridge is a self-contained offline HTML package. Machine B remains the only application/API host at `127.0.0.1`; machine A only opens a generated file and never connects to the application.
+
+Primary Committee endpoints:
+
+| Method | Route | Body/response | Policy |
+| --- | --- | --- | --- |
+| POST | `/api/v1/interview-cases/{caseId}/candidate-package/export` | No body; binary `text/html; charset=utf-8` attachment | Committee session + startup token |
+| POST | `/api/v1/interview-cases/{caseId}/candidate-package/import` | Binary HTML body, max 10 MiB; JSON snapshot envelope | Committee session + startup token + idempotency key |
+
+The exported package format is `candidate-html.v1`. It contains only candidate-safe question fields. The candidate submits a `RESPONSE` package; import validates the case-owned Question Set ID/version/fingerprint and exact question projection before creating an immutable `HTML_IMPORT` Assessment Snapshot. Excel export/import remains supported as an explicitly labeled fallback through the existing `/question-set/export` and `/assessment-snapshots/import` routes.
+
+Evaluation consumes the normalized snapshot shape and records `sourceKind`, `sourceFileSha256`, and `packageId`; no HTML source or raw package bytes are sent to an AI provider.
+
 ## 9. Acceptance criteria
 
 1. Resource map bao phủ health, jobs, candidates, cases, documents, question sets, assessment, AI, brief, live, evaluation, settings, backup/export.

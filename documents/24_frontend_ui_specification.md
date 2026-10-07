@@ -236,6 +236,19 @@ Untrusted text từ candidate/AI/document luôn render bằng textContent. Khôn
 - Automated browser test framework sau khi có Node/build decision.
 - Native kiosk mode nếu pilot yêu cầu.
 
+## 0A. Active offline HTML transfer flow
+
+The Committee workspace uses this four-step active flow:
+
+1. Prepare and confirm JD/CV.
+2. Generate, edit, and approve the Question Set.
+3. Export a self-contained HTML Question Package on machine B; the candidate opens it on machine A, answers offline, and downloads the submitted response HTML.
+4. Import the response HTML on machine B, review the immutable snapshot, and request AI evaluation.
+
+The primary Questions action is `candidate-package/export`; the primary Answers action accepts `.html` and calls `candidate-package/import` with `Content-Type: text/html`. The existing Excel bridge is retained as a visible `Excel fallback`. Committee navigation does not open Candidate Mode or require a second server, LAN access, browser storage, or a candidate token for this offline package flow.
+
+Candidate HTML is self-contained and must not load external resources. The Committee UI validates extension and the 10 MiB limit before upload, uses the server idempotency key, and renders imported answer/question text with `textContent`.
+
 ## 8. Acceptance criteria
 
 1. Có route map cho toàn bộ flow MVP.

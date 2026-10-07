@@ -230,6 +230,18 @@ Mỗi testcase gồm ID, requirement reference, priority, precondition, input, s
 - Load test scale for multi-machine/server mode.
 - Formal external penetration test.
 
+## 0A. Offline HTML package acceptance
+
+The following acceptance checks are required in addition to the existing Candidate Mode regression cases:
+
+- Approved Question Set export returns a self-contained `candidate-html.v1` HTML file with no internal rubric/expected-evidence fields and records `QUESTION_SET_EXPORTED`.
+- Candidate opens the file offline, submits a response, and the Committee imports it through the binary endpoint; blank answers are preserved as `NOT_ASSESSED`.
+- Wrong case/set/version/fingerprint, draft package, malformed HTML, duplicate idempotency key, and response over 10 MiB are rejected without replacing an existing snapshot.
+- Re-importing the same response with the same idempotency key is idempotent; a changed response creates a new immutable snapshot version.
+- Committee auth/startup-token enforcement applies to both HTML endpoints; machine A needs no application endpoint.
+- HTML-imported snapshots queue and complete `answer-evaluation.v2`; the provider payload contains sanitized JD/CV/question/answer data but never HTML/package bytes or internal tokens.
+- Excel export/import remains a passing fallback path.
+
 ## 16. Acceptance criteria
 
 1. Có test strategy, environment, fixtures và testcase format.

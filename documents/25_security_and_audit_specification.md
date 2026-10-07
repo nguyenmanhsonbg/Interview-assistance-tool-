@@ -279,6 +279,20 @@ Never disclose whether another candidate/case exists to Candidate Mode.
 - Security review/penetration test for production pilot.
 - Formal retention/legal policy for old backup packages.
 
+## 0A. Offline package trust boundary
+
+The approved topology is:
+
+```text
+Machine B: Committee browser -> localhost API/SQLite/filesystem
+Machine A: candidate opens generated HTML file -> local browser only
+Transfer: Question Package HTML B -> A; Response Package HTML A -> B
+```
+
+Machine A is not a second API client and does not receive the server startup token, Committee session, candidate token, API key, JD/CV, rubric, or internal evidence. The generated package contains candidate-safe question text and a minimal manifest only. The response is treated as untrusted input at import; the parser reads the inert JSON payload and does not render imported HTML as application markup.
+
+The accepted MVP threat model is protection against ordinary operational mistakes: wrong file, wrong case, draft file, malformed file, duplicate import, and accidental re-import. Deliberate modification of a local HTML file by a determined actor is out of scope for this supervised local MVP; case-owned Question Set ID/version/fingerprint, exact question projection, source hash, idempotency, audit, and immutable snapshot versioning still prevent silent mixing during normal operation.
+
 ## 18. Acceptance criteria
 
 1. Trust boundary and threat model are explicit.
