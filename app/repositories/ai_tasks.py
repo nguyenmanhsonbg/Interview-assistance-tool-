@@ -59,17 +59,20 @@ class AITaskRepository(RepositoryBase):
         )
         return None if row is None else _result_dict(row)
 
-    def insert(self, connection: sqlite3.Connection, *, task_id: str, case_id: str, assessment_attempt_id: str | None, assessment_snapshot_id: str | None, task_type: str, idempotency_key: str, input_fingerprint: str, input_manifest: dict[str, Any], provider: str | None, model: str | None, prompt_key: str, prompt_version: str, schema_version: str, max_retry: int) -> None:
+    def insert(self, connection: sqlite3.Connection, *, task_id: str, case_id: str, assessment_attempt_id: str | None, assessment_snapshot_id: str | None, task_type: str, idempotency_key: str, input_fingerprint: str, input_manifest: dict[str, Any], provider: str | None, model: str | None, prompt_key: str, prompt_version: str, schema_version: str, max_retry: int, phase: str | None = None) -> None:
         connection.execute(
             """INSERT INTO ai_tasks(
                 id, interview_case_id, assessment_attempt_id, assessment_snapshot_id, task_type,
                 idempotency_key, input_fingerprint, input_manifest_json,
-                provider, model, prompt_key, prompt_version, schema_version, max_retry
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                provider, model, prompt_key, prompt_version, schema_version, max_retry, phase
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (task_id, case_id, assessment_attempt_id, assessment_snapshot_id, task_type, idempotency_key,
              input_fingerprint, json.dumps(input_manifest, ensure_ascii=False, separators=(",", ":")),
-             provider, model, prompt_key, prompt_version, schema_version, max_retry),
+             provider, model, prompt_key, prompt_version, schema_version, max_retry, phase),
         )
+
+    def set_phase(self, connection: sqlite3.Connection, task_id: str, phase: str) -> None:
+        connection.execute("UPDATE ai_tasks SET phase=? WHERE id=?", (phase, task_id))
 
     def mark_running(self, connection: sqlite3.Connection, task_id: str) -> None:
         connection.execute(
@@ -122,7 +125,7 @@ def _task_dict(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": row["id"], "interviewCaseId": row["interview_case_id"],
         "assessmentAttemptId": row["assessment_attempt_id"], "assessmentSnapshotId": row["assessment_snapshot_id"], "taskType": row["task_type"],
-        "status": row["status"], "idempotencyKey": row["idempotency_key"],
+        "status": row["status"], "phase": row["phase"], "idempotencyKey": row["idempotency_key"],
         "inputFingerprint": row["input_fingerprint"], "inputManifest": json.loads(row["input_manifest_json"]),
         "provider": row["provider"], "model": row["model"], "promptKey": row["prompt_key"],
         "promptVersion": row["prompt_version"], "schemaVersion": row["schema_version"],

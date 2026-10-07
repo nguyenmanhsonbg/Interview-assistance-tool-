@@ -19,6 +19,7 @@ _TASK_CONFIG = {
     "GENERATE_BRIEF": ("INTERVIEW_BRIEF", "answer_evaluation", "answer-evaluation.v1"),
     "SUGGEST_FOLLOW_UP": ("FOLLOW_UP", "follow_up_question", "follow-up.v1"),
 }
+_EVALUATION_PHASES = {"EVIDENCE_ANALYSIS", "EVALUATION_SYNTHESIS"}
 
 
 class AITaskService:
@@ -58,11 +59,26 @@ class AITaskService:
                 idempotency_key=idempotency_key, input_fingerprint=input_fingerprint.lower(),
                 input_manifest=input_manifest, provider=provider, model=model,
                 prompt_key=prompt_key, prompt_version=schema_version,
-                schema_version=schema_version, max_retry=max_retry)
+                schema_version=schema_version, max_retry=max_retry,
+                phase="EVIDENCE_ANALYSIS" if task_type == "EVALUATE_ASSESSMENT" and assessment_snapshot_id else None)
             append_audit(connection, actor_type="SYSTEM", action="AI_TASK_CREATED",
                 entity_type="AI_TASK", entity_id=task_id,
                 metadata={"taskType": task_type, "resultType": result_type})
         return self.repository.get(task_id)
+
+    def set_phase(self, task_id: str, phase: str) -> None:
+        if phase not in _EVALUATION_PHASES:
+            raise ValidationError("Unsupported AI evaluation phase")
+        with self.database.transaction() as connection:
+            task = connection.execute(
+                "SELECT task_type, assessment_snapshot_id FROM ai_tasks WHERE id=?",
+                (task_id,),
+            ).fetchone()
+            if task is None:
+                raise ResourceNotFound("AI task not found")
+            if task["task_type"] != "EVALUATE_ASSESSMENT" or task["assessment_snapshot_id"] is None:
+                raise StateConflict("AI phase is only available for snapshot evaluation")
+            self.repository.set_phase(connection, task_id, phase)
 
     def process(self, task_id: str, provider: AIProvider, *, payload_override: dict[str, Any] | None = None, context_override: dict[str, Any] | None = None) -> dict[str, Any]:
         task = self.repository.get(task_id)
@@ -117,6 +133,11 @@ class AITaskService:
                    FROM ai_tasks WHERE status='RUNNING'"""
             ).fetchall()
             for row in rows:
+                if row["task_type"] == "EVALUATE_ASSESSMENT" and row["assessment_snapshot_id"]:
+                    connection.execute(
+                        "UPDATE ai_tasks SET phase='EVIDENCE_ANALYSIS' WHERE id=?",
+                        (row["id"],),
+                    )
                 if row["retry_count"] < row["max_retry"]:
                     connection.execute("UPDATE ai_tasks SET status='PENDING_RETRY', retry_count=retry_count+1, error_code='AI_TASK_INTERRUPTED', error_message='Recovered after restart' WHERE id=?", (row["id"],))
                     append_audit(

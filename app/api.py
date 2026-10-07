@@ -327,7 +327,7 @@ class APIController:
     def get_task(self, request: Request) -> Response:
         task = self.tasks.get(request.path_params["task_id"])
         result = task.pop("result", None)
-        safe_task = {key: task[key] for key in ("id", "taskType", "status", "assessmentSnapshotId", "createdAt", "startedAt", "finishedAt", "errorCode")}
+        safe_task = {key: task[key] for key in ("id", "taskType", "status", "phase", "assessmentSnapshotId", "createdAt", "startedAt", "finishedAt", "errorCode")}
         if safe_task["status"] == "COMPLETED" and safe_task["errorCode"] == "AI_MATERIALIZATION_FAILED":
             safe_task["status"] = "FAILED"
         if safe_task["status"] == "COMPLETED":

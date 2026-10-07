@@ -40,6 +40,22 @@ class RefinedEvaluationTests(MigratedDatabaseFixture, unittest.TestCase):
             idempotency_key="refined-evaluation-import",
         )
 
+    def test_snapshot_evaluation_task_exposes_safe_phase_and_can_transition(self):
+        from app.services.evaluation_service import EvaluationService
+
+        service = EvaluationService(
+            self.database, Path(__file__).resolve().parents[1] / "schemas"
+        )
+        task = service.request_snapshot(
+            self.case["id"], self.snapshot["id"], idempotency_key="phase-transition"
+        )
+
+        self.assertEqual("EVIDENCE_ANALYSIS", task["phase"])
+        service.tasks.set_phase(task["id"], "EVALUATION_SYNTHESIS")
+        transitioned = service.tasks.repository.get(task["id"])
+        self.assertEqual("EVALUATION_SYNTHESIS", transitioned["phase"])
+        self.assertNotIn("inputManifest", transitioned.get("safe", {}))
+
     def test_snapshot_evaluation_manifest_and_provider_payload_are_sanitized(self):
         from app.services.evaluation_service import EvaluationService
 
@@ -120,7 +136,7 @@ class RefinedEvaluationTests(MigratedDatabaseFixture, unittest.TestCase):
         )
         with self.database.transaction() as connection:
             connection.execute(
-                "UPDATE ai_tasks SET status='RUNNING', retry_count=1, max_retry=1 WHERE id=?",
+                "UPDATE ai_tasks SET status='RUNNING', phase='EVALUATION_SYNTHESIS', retry_count=1, max_retry=1 WHERE id=?",
                 (task["id"],),
             )
 
@@ -128,6 +144,7 @@ class RefinedEvaluationTests(MigratedDatabaseFixture, unittest.TestCase):
 
         self.assertEqual([task["id"]], recovered["failed"])
         self.assertEqual("AI_ANALYSIS_FAILED", service.refined_status(self.case["id"]))
+        self.assertEqual("EVIDENCE_ANALYSIS", service.tasks.repository.get(task["id"])["phase"])
 
 
 if __name__ == "__main__":
