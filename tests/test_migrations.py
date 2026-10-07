@@ -21,7 +21,7 @@ class MigrationTests(unittest.TestCase):
         from app.migrations import MigrationRunner
 
         runner = MigrationRunner(self.database, self.migrations)
-        self.assertEqual([1, 2, 3, 4], runner.apply_all())
+        self.assertEqual([1, 2, 3, 4, 5], runner.apply_all())
         self.assertEqual([], runner.apply_all())
 
         with self.database.connection() as connection:
@@ -50,7 +50,7 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual("9", settings["assessment.default_question_count"])
         self.assertEqual("9", settings["assessment.max_question_count"])
         self.assertEqual("MANUAL_ONLY", settings["retention.mode"])
-        self.assertEqual([1, 2, 3, 4], [row[0] for row in versions])
+        self.assertEqual([1, 2, 3, 4, 5], [row[0] for row in versions])
 
         with self.database.connection() as connection:
             columns = {

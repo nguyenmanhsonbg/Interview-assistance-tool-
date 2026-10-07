@@ -36,6 +36,7 @@
 ### New files
 
 - `migrations/004_html_candidate_package_flow.sql` — adds canonical assessment input provenance for `HTML_IMPORT`, package ID, and generic source-file hash while preserving legacy Excel columns/data.
+- `migrations/005_allow_multiple_candidate_responses.sql` — removes package-ID uniqueness so a changed response from the same exported package can create a new immutable snapshot version.
 - `app/infrastructure/html_candidate_package.py` — validates, renders, and parses `candidate-html.v1` question/draft/response packages; owns no database or workflow state.
 - `app/services/html_candidate_package_service.py` — exports approved Question Sets and imports validated response packages into snapshots; owns audit and case refined-flow transitions.
 - `tests/test_html_candidate_package.py` — codec, HTML safety, file://-compatible bundle, draft, response, and malformed-payload tests.
@@ -166,6 +167,7 @@
 **Files:**
 - Create: `app/services/html_candidate_package_service.py`
 - Create: `tests/test_html_candidate_package_service.py`
+- Create: `migrations/005_allow_multiple_candidate_responses.sql`
 - Modify: `app/repositories/assessment_snapshots.py` if Task 1 exposes a missing shared helper
 
 **Interfaces:**

@@ -172,8 +172,13 @@ class AssessmentSnapshotRepository(RepositoryBase):
             (row["id"],),
         ).fetchall()
         answers = connection.execute(
-            """SELECT * FROM assessment_snapshot_answers
-               WHERE assessment_snapshot_id=? ORDER BY question_id""",
+            """SELECT answer.*
+               FROM assessment_snapshot_answers AS answer
+               JOIN assessment_snapshot_questions AS question
+                 ON question.assessment_snapshot_id=answer.assessment_snapshot_id
+                AND question.question_id=answer.question_id
+               WHERE answer.assessment_snapshot_id=?
+               ORDER BY question.display_order""",
             (row["id"],),
         ).fetchall()
         return {
