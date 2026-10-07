@@ -35,6 +35,22 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("textContent", scripts)
         self.assertIn("currentSnapshotId", scripts)
         self.assertIn("clearSensitiveState", scripts)
+        self.assertIn("generateCandidateCode", scripts)
+        self.assertIn("readOnly", scripts)
+        self.assertIn("Tên Lead HĐCM", scripts)
+        self.assertNotIn("jobCode", scripts)
+        self.assertNotIn("scheduledAt", scripts)
+
+    def test_html_candidate_transfer_is_primary_and_excel_is_explicit_fallback(self):
+        root = Path(__file__).resolve().parents[1] / "web"
+        scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
+        self.assertIn("/candidate-package/export", scripts)
+        self.assertIn("/candidate-package/import", scripts)
+        self.assertIn("candidate-html.v1", scripts)
+        self.assertIn('htmlFile.accept = ".html,text/html"', scripts)
+        self.assertIn('contentType: "text/html"', scripts)
+        self.assertIn("Excel fallback", scripts)
+        self.assertIn("MAX_HTML_PACKAGE_BYTES", scripts)
 
     def test_no_third_party_runtime_import_manifest_exists(self):
         root = Path(__file__).resolve().parents[1]

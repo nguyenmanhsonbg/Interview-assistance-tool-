@@ -9,6 +9,8 @@ skipLink?.addEventListener("click", (event) => {
   document.querySelector("#main-content")?.focus();
 });
 const MAX_WORKBOOK_BYTES = 10 * 1024 * 1024;
+const MAX_HTML_PACKAGE_BYTES = 10 * 1024 * 1024;
+const HTML_PACKAGE_FORMAT = "candidate-html.v1";
 const MAX_DOCUMENT_BYTES = 7_500_000;
 const taskPollers = new Map();
 let routerStarted = false;
@@ -1023,12 +1025,17 @@ async function renderQuestions(caseId) {
       }, "primary");
       actions.append(approve);
     }
-    const exportButton = button("Xuất Excel câu hỏi", async () => {
+    const exportHtmlButton = button("Xuất bộ câu hỏi HTML cho ứng viên", async () => {
+      const downloaded = await apiDownload("/api/v1/interview-cases/" + encodeURIComponent(caseId) + "/candidate-package/export", { method: "POST" });
+      saveDownload(downloaded.blob, downloaded.response.headers.get("Content-Disposition") || "candidate-assessment.html");
+      location.hash = stepHref(caseId, "answers").slice(1);
+    }, "primary");
+    const exportButton = button("Excel fallback: xuất bộ câu hỏi", async () => {
       const downloaded = await apiDownload("/api/v1/interview-cases/" + encodeURIComponent(caseId) + "/question-set/export", { method: "POST" });
       saveDownload(downloaded.blob, downloaded.response.headers.get("Content-Disposition") || "question-answer.xlsx");
       location.hash = stepHref(caseId, "answers").slice(1);
-    }, "primary");
-    actions.append(exportButton, link("Tiếp: Câu trả lời", stepHref(caseId, "answers"), "link-button"));
+    }, "secondary");
+    actions.append(exportHtmlButton, exportButton, link("Tiếp: Câu trả lời", stepHref(caseId, "answers"), "link-button"));
     view.append(actions);
     return view;
   });
@@ -1110,15 +1117,40 @@ async function renderAnswers(caseId) {
     } catch (error) {
       if (error.status !== 404) throw error;
     }
-    const importCard = element("section", undefined, "card stack");
-    importCard.append(element("h2", "Import Question + Answer bằng Excel"), element("p", "Chỉ import workbook đã xuất từ Question Set tương ứng của case.", "muted"));
+    const importCard = element("section", undefined, "card stack transfer-card");
+    importCard.append(element("h2", "Import câu trả lời từ máy ứng viên"), element("p", "Ứng viên mở file HTML offline, nộp bài và gửi lại file response cho HĐCM.", "muted"));
+    const htmlFile = document.createElement("input");
+    htmlFile.type = "file";
+    htmlFile.accept = ".html,text/html";
+    htmlFile.name = "candidate-response-package";
+    let htmlImportIdempotencyKey = null;
+    htmlFile.addEventListener("change", () => { htmlImportIdempotencyKey = null; });
+    const htmlLabel = element("label", "Candidate response .html");
+    htmlLabel.append(htmlFile);
+    const htmlImportButton = button("Import candidate HTML", async () => {
+      const responseFile = htmlFile.files?.[0];
+      if (!responseFile) throw new Error("Hãy chọn file response .html");
+      if (!responseFile.name.toLowerCase().endsWith(".html")) throw new Error("Chỉ hỗ trợ file .html");
+      if (responseFile.size > MAX_HTML_PACKAGE_BYTES) throw new Error("HTML package vượt quá 10 MB");
+      htmlImportIdempotencyKey ||= globalThis.crypto?.randomUUID?.() || "ui-html-upload-" + Date.now() + "-" + Math.random().toString(16).slice(2);
+      const result = await apiUpload("/api/v1/interview-cases/" + encodeURIComponent(caseId) + "/candidate-package/import", responseFile, {
+        contentType: "text/html",
+        headers: { "X-Idempotency-Key": htmlImportIdempotencyKey },
+      });
+      setState({ currentSnapshotId: result.snapshot.id });
+      await renderAnswers(caseId);
+    }, "primary");
+    importCard.append(htmlLabel, htmlImportButton);
+
+    const excelFallback = element("section", undefined, "card stack transfer-fallback");
+    excelFallback.append(element("h2", "Excel fallback"), element("p", "Dùng khi cần xử lý thủ công bằng workbook .xlsx.", "muted"));
     const file = document.createElement("input");
     file.type = "file";
     file.accept = ".xlsx";
     file.name = "question-answer-workbook";
     let importIdempotencyKey = null;
     file.addEventListener("change", () => { importIdempotencyKey = null; });
-    const label = element("label", "Workbook .xlsx");
+    const label = element("label", "Excel fallback .xlsx");
     label.append(file);
     const taskNote = element("div", undefined, "stack");
     const importButton = button("Import workbook", async () => {
@@ -1133,14 +1165,14 @@ async function renderAnswers(caseId) {
       setState({ currentSnapshotId: result.snapshot.id });
       await renderAnswers(caseId);
     }, "primary");
-    importCard.append(label, importButton, taskNote);
-    view.append(importCard);
+    excelFallback.append(label, importButton, taskNote);
+    view.append(importCard, excelFallback);
     if (snapshot) {
       view.append(renderSnapshotWorkspace(snapshot));
       view.append(element("div", "Snapshot là immutable; AI sẽ đánh giá đúng snapshot đang hiển thị.", "notice"));
       view.append(link("Tiếp: Đánh giá AI", stepHref(caseId, "ai"), "link-button"));
     } else {
-      view.append(element("section", "Chưa có assessment snapshot. Hãy import workbook để tiếp tục.", "empty-state"));
+      view.append(element("section", "Chưa có assessment snapshot. Hãy import candidate HTML hoặc dùng Excel fallback.", "empty-state"));
     }
     return view;
   });
