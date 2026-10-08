@@ -13,9 +13,22 @@ class JobCandidateServiceTests(MigratedDatabaseFixture, unittest.TestCase):
         candidate = service.create_candidate("CAND-1", "Nguyen Van A")
 
         self.assertEqual("Backend Engineer", job["positionTitle"])
+        self.assertEqual("Senior", job["targetLevel"])
+        self.assertEqual("READY", job["targetLevelStatus"])
+        self.assertEqual("LEGACY", job["targetLevelSource"])
         self.assertEqual("CAND-1", candidate["candidateCode"])
         self.assertEqual(1, len(service.list_jobs("Backend")))
         self.assertEqual(1, len(service.list_candidates("CAND-1")))
+
+    def test_create_job_without_level_starts_pending(self):
+        from app.services.case_service import CaseService
+
+        job = CaseService(self.database).create_job(None, "Backend Engineer", None)
+
+        self.assertIsNone(job["targetLevel"])
+        self.assertEqual("PENDING", job["targetLevelStatus"])
+        self.assertIsNone(job["targetLevelSource"])
+        self.assertIsNone(job["targetLevelConfidence"])
 
     def test_empty_values_and_duplicate_codes_are_rejected(self):
         from app.domain.errors import ValidationError

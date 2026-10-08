@@ -61,6 +61,8 @@ class InterviewCaseRepository(RepositoryBase):
         row = self.query_one(
             """SELECT ic.*, c.candidate_code, c.full_name,
                       j.job_code, j.position_title, j.target_level,
+                      j.target_level_status, j.target_level_source,
+                      j.target_level_confidence,
                       (SELECT t.id FROM ai_tasks t
                        WHERE t.interview_case_id = ic.id
                          AND t.status IN ('PENDING', 'PENDING_RETRY', 'RUNNING')
@@ -84,6 +86,8 @@ class InterviewCaseRepository(RepositoryBase):
     def list(self, status: str | None = None) -> list[dict[str, Any]]:
         sql = """SELECT ic.*, c.candidate_code, c.full_name,
                         j.job_code, j.position_title, j.target_level,
+                        j.target_level_status, j.target_level_source,
+                        j.target_level_confidence,
                         (SELECT t.id FROM ai_tasks t
                          WHERE t.interview_case_id = ic.id
                            AND t.status IN ('PENDING', 'PENDING_RETRY', 'RUNNING')
@@ -124,6 +128,9 @@ def _case_dict(row: sqlite3.Row, members: list[sqlite3.Row]) -> dict[str, Any]:
             "jobCode": row["job_code"],
             "positionTitle": row["position_title"],
             "targetLevel": row["target_level"],
+            "targetLevelStatus": row["target_level_status"],
+            "targetLevelSource": row["target_level_source"],
+            "targetLevelConfidence": row["target_level_confidence"],
         },
         "committeeMembers": [
             {

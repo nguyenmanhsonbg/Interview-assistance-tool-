@@ -12,12 +12,20 @@ class JobRepository(RepositoryBase):
         job_id: str,
         job_code: str | None,
         position_title: str,
-        target_level: str,
+        target_level: str | None,
+        target_level_status: str,
+        target_level_source: str | None,
+        target_level_confidence: float | None,
     ) -> None:
         connection.execute(
-            """INSERT INTO jobs(id, job_code, position_title, target_level)
-               VALUES (?, ?, ?, ?)""",
-            (job_id, job_code, position_title, target_level),
+            """INSERT INTO jobs(
+                   id, job_code, position_title, target_level,
+                   target_level_status, target_level_source, target_level_confidence
+               ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                job_id, job_code, position_title, target_level,
+                target_level_status, target_level_source, target_level_confidence,
+            ),
         )
 
     def list(self, query: str | None = None) -> list[sqlite3.Row]:

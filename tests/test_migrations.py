@@ -21,7 +21,7 @@ class MigrationTests(unittest.TestCase):
         from app.migrations import MigrationRunner
 
         runner = MigrationRunner(self.database, self.migrations)
-        self.assertEqual([1, 2, 3, 4, 5, 6, 7, 8, 9], runner.apply_all())
+        self.assertEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], runner.apply_all())
         self.assertEqual([], runner.apply_all())
 
         with self.database.connection() as connection:
@@ -50,13 +50,78 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual("9", settings["assessment.default_question_count"])
         self.assertEqual("30", settings["assessment.max_question_count"])
         self.assertEqual("MANUAL_ONLY", settings["retention.mode"])
-        self.assertEqual([1, 2, 3, 4, 5, 6, 7, 8, 9], [row[0] for row in versions])
+        self.assertEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], [row[0] for row in versions])
+
+    def test_jd_level_migration_preserves_jobs_and_extends_ai_contract(self):
+        from app.migrations import MigrationRunner
+
+        migration_copy = self.root / "migrations"
+        migration_copy.mkdir()
+        for version in range(1, 10):
+            source = next(self.migrations.glob(f"{version:03d}_*.sql"))
+            shutil.copy2(source, migration_copy / source.name)
+
+        runner = MigrationRunner(self.database, migration_copy)
+        self.assertEqual(list(range(1, 10)), runner.apply_all())
+        with self.database.transaction() as connection:
+            connection.execute(
+                "INSERT INTO jobs(id, position_title, target_level) VALUES ('j', 'Role', 'L1')"
+            )
+            connection.execute(
+                "INSERT INTO candidates(id, candidate_code, full_name) VALUES ('c', 'C1', 'Candidate')"
+            )
+            connection.execute(
+                "INSERT INTO interview_cases(id, candidate_id, job_id) VALUES ('case', 'c', 'j')"
+            )
+
+        shutil.copy2(
+            self.migrations / "010_jd_level_provisioning.sql",
+            migration_copy / "010_jd_level_provisioning.sql",
+        )
+        self.assertEqual([10], runner.apply_all())
+
+        with self.database.transaction() as connection:
+            job = connection.execute(
+                "SELECT target_level, target_level_status, target_level_source, target_level_confidence FROM jobs WHERE id='j'"
+            ).fetchone()
+            connection.execute(
+                """INSERT INTO ai_tasks(
+                    id, interview_case_id, task_type, idempotency_key, input_fingerprint
+                ) VALUES ('level-task', 'case', 'EXTRACT_JOB_LEVEL', 'level-idem', ?)""",
+                ("a" * 64,),
+            )
+            connection.execute(
+                """INSERT INTO ai_results(
+                    id, ai_task_id, interview_case_id, result_type, payload_json
+                ) VALUES ('level-result', 'level-task', 'case', 'JOB_LEVEL_EXTRACTION', '{}')"""
+            )
+        self.assertEqual(("L1", "READY", "LEGACY", None), tuple(job))
+
+        with self.database.connection() as connection:
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    """INSERT INTO jobs(
+                        id, position_title, target_level_status
+                    ) VALUES ('invalid-status', 'Role', 'UNKNOWN')"""
+                )
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    """INSERT INTO jobs(
+                        id, position_title, target_level_status, target_level_source
+                    ) VALUES ('invalid-source', 'Role', 'PENDING', 'UNKNOWN')"""
+                )
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    """INSERT INTO jobs(
+                        id, position_title, target_level_status, target_level_confidence
+                    ) VALUES ('invalid-confidence', 'Role', 'PENDING', 2.0)"""
+                )
 
     def test_question_addition_migration_adds_scoped_ai_contract_and_proposals(self):
         from app.migrations import MigrationRunner
 
         runner = MigrationRunner(self.database, self.migrations)
-        self.assertEqual([1, 2, 3, 4, 5, 6, 7, 8, 9], runner.apply_all())
+        self.assertEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], runner.apply_all())
         with self.database.transaction() as connection:
             connection.execute(
                 "INSERT INTO jobs(id, position_title, target_level) VALUES ('j', 'Role', 'L1')"

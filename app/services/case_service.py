@@ -20,14 +20,21 @@ class CaseService:
         self.cases = InterviewCaseRepository(database)
 
     def create_job(
-        self, job_code: str | None, position_title: str, target_level: str
+        self, job_code: str | None, position_title: str, target_level: str | None
     ) -> dict[str, Any]:
         position_title = require_text(position_title, "positionTitle")
-        target_level = require_text(target_level, "targetLevel")
+        target_level = target_level.strip() if isinstance(target_level, str) else None
+        if target_level == "":
+            target_level = None
+        target_level_status = "READY" if target_level else "PENDING"
+        target_level_source = "LEGACY" if target_level else None
         normalized_code = job_code.strip() if isinstance(job_code, str) and job_code.strip() else None
         job_id = str(uuid.uuid4())
         with self.database.transaction() as connection:
-            self.jobs.insert(connection, job_id, normalized_code, position_title, target_level)
+            self.jobs.insert(
+                connection, job_id, normalized_code, position_title, target_level,
+                target_level_status, target_level_source, None,
+            )
         row = self.jobs.query_one("SELECT * FROM jobs WHERE id = ?", (job_id,))
         return _job_dict(row)
 
@@ -128,6 +135,9 @@ def _job_dict(row) -> dict[str, Any]:
     return {
         "id": row["id"], "jobCode": row["job_code"],
         "positionTitle": row["position_title"], "targetLevel": row["target_level"],
+        "targetLevelStatus": row["target_level_status"],
+        "targetLevelSource": row["target_level_source"],
+        "targetLevelConfidence": row["target_level_confidence"],
         "createdAt": row["created_at"], "updatedAt": row["updated_at"],
     }
 

@@ -28,6 +28,9 @@ class InterviewCaseServiceTests(MigratedDatabaseFixture, unittest.TestCase):
         self.assertEqual(900, case["assessmentDurationSeconds"])
         self.assertTrue(case["allowIncompleteSubmit"])
         self.assertEqual(2, len(case["committeeMembers"]))
+        self.assertEqual("Senior", case["job"]["targetLevel"])
+        self.assertEqual("READY", case["job"]["targetLevelStatus"])
+        self.assertEqual("LEGACY", case["job"]["targetLevelSource"])
         with self.database.connection() as connection:
             action = connection.execute(
                 "SELECT action FROM audit_logs WHERE entity_id = ?", (case["id"],)
