@@ -1512,7 +1512,7 @@ function renderQuestionWorkspace(questionSet, caseId, onRefresh, assessmentStart
       const groupSection = element("section", undefined, "question-group");
       const groupTitle = element("div", undefined, "question-group-title");
       const groupCopy = element("div", undefined, "stack");
-      groupCopy.append(element("h3", group.label), element("span", group.items.length + " cÃ¢u", "question-group-count"));
+      groupCopy.append(element("h3", group.label));
       groupTitle.append(groupCopy);
       const isStandardGroup = ["FOUNDATION", "APPLICATION", "DEEP_DIVE"].includes(group.key);
       let addButton = null;

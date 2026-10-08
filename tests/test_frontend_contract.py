@@ -248,6 +248,9 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn('questionSet.status === "APPROVED" || assessmentStarted', scripts)
         self.assertNotIn("Sá»­a báº±ng tay", scripts)
 
+        self.assertNotIn("question-group-count", styles + scripts)
+        self.assertNotIn("group.items.length + ", scripts)
+
     def test_question_addition_popups_use_valid_vietnamese_copy(self):
         root = Path(__file__).resolve().parents[1] / "web"
         scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
