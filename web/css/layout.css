@@ -55,7 +55,8 @@
 .question-addition-proposal { border-color: var(--ui-primary); background: var(--ui-primary-soft); }
 .question-addition-summary { gap: 8px; }
 .question-addition-summary-text { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.question-addition-detail-modal { width: min(960px, 100%); max-height: min(90vh, 760px); overflow: auto; }
+.question-addition-detail { padding: 12px; }
+.question-addition-detail-modal { width: min(1200px, calc(100vw - 24px)); max-height: min(90vh, 760px); overflow: auto; }
 .question-addition-columns { display: grid; grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr); gap: 20px; align-items: start; }
 .question-addition-question { min-width: 0; }
 .question-addition-rubric { min-width: 0; padding: 12px; border: 1px solid var(--ui-border); border-radius: 8px; background: var(--ui-surface); }
