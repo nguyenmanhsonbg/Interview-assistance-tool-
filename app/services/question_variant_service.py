@@ -160,6 +160,16 @@ class QuestionVariantService:
             case_id, question_set_id, question_id, proposal_id
         )
 
+    def get_proposal_by_id(
+        self, case_id: str, question_id: str, proposal_id: str
+    ) -> dict[str, Any]:
+        return self.repository.get_proposal_by_id(case_id, question_id, proposal_id)
+
+    def list_active_proposals(
+        self, case_id: str, question_set_id: str, question_id: str
+    ) -> list[dict[str, Any]]:
+        return self.repository.list_active_proposals(case_id, question_set_id, question_id)
+
     def discard_proposal(
         self,
         case_id: str,

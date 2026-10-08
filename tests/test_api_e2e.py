@@ -230,6 +230,12 @@ class PilotE2ETests(unittest.TestCase):
         self.assertEqual("PROPOSED", proposal["status"])
         self.assertNotIn("payloadJson", proposal)
         self.assertNotIn("rawPayload", proposal)
+        active = self.call(
+            "GET",
+            variant_path + "?questionSetId=" + question_set["id"],
+            headers=self.committee_headers(False),
+        )
+        self.assertEqual([proposal_id], [item["proposalId"] for item in active["items"]])
 
         refreshed = self.call(
             "GET", f"/api/v1/interview-cases/{case['id']}/question-set",

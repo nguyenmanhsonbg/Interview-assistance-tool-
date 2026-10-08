@@ -136,7 +136,7 @@ Candidate không được đọc JD, CV, rubric, expected evidence, AI result, I
 | POST/GET | /api/v1/interview-cases/{caseId}/documents | Committee | Upload/list documents |
 | POST | /api/v1/interview-cases/{caseId}/documents/{documentId}/confirm | Committee | Confirm text |
 | POST/GET/PATCH | /api/v1/interview-cases/{caseId}/question-set | Committee | Generate/read/edit set |
-| POST/GET | /api/v1/interview-cases/{caseId}/question-set/questions/{questionId}/variants | Committee | Generate/read question variant proposal |
+| POST/GET | /api/v1/interview-cases/{caseId}/question-set/questions/{questionId}/variants và `.../variants/{variantId}` | Committee | Generate/read proposal; collection GET đọc proposal `PROPOSED` để resume/re-entry |
 | POST | /api/v1/interview-cases/{caseId}/question-set/questions/{questionId}/variants/{variantId}/discard | Committee | Discard proposal |
 | POST | /api/v1/interview-cases/{caseId}/question-set/questions/{questionId}/variants/{variantId}/apply | Committee | Apply proposal to draft slot |
 | POST | /api/v1/interview-cases/{caseId}/question-set/approve | Committee | Approve set |

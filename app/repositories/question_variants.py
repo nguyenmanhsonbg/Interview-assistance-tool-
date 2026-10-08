@@ -28,6 +28,20 @@ class QuestionVariantRepository(RepositoryBase):
             raise ResourceNotFound("Question variant proposal not found")
         return _proposal_dict(row)
 
+    def get_proposal_by_id(
+        self, case_id: str, question_id: str, proposal_id: str
+    ) -> dict[str, Any]:
+        row = self.query_one(
+            """SELECT p.*, r.payload_json, r.version_no, r.created_at AS result_created_at
+               FROM question_variant_proposals p
+               JOIN ai_results r ON r.id=p.ai_result_id
+               WHERE p.id=? AND p.interview_case_id=? AND p.source_question_id=?""",
+            (proposal_id, case_id, question_id),
+        )
+        if row is None:
+            raise ResourceNotFound("Question variant proposal not found")
+        return _proposal_dict(row)
+
     def list_active_proposals(
         self, case_id: str, question_set_id: str, question_id: str
     ) -> list[dict[str, Any]]:

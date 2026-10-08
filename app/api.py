@@ -102,6 +102,7 @@ class APIController:
         router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set", self.generate_question_set, **committee)
         router.add("PATCH", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set", self.update_question_set, **committee)
         router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set/questions/(?P<question_id>[^/]+)/variants", self.create_question_variant, **committee)
+        router.add("GET", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set/questions/(?P<question_id>[^/]+)/variants", self.list_question_variants, **committee)
         router.add("GET", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set/questions/(?P<question_id>[^/]+)/variants/(?P<variant_id>[^/]+)", self.get_question_variant, **committee)
         router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set/questions/(?P<question_id>[^/]+)/variants/(?P<variant_id>[^/]+)/discard", self.discard_question_variant, **committee)
         router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set/questions/(?P<question_id>[^/]+)/variants/(?P<variant_id>[^/]+)/apply", self.apply_question_variant, **committee)
@@ -271,6 +272,15 @@ class APIController:
             request.path_params["variant_id"],
         )
         return _ok(request, proposal)
+
+    def list_question_variants(self, request: Request) -> Response:
+        question_set_id = request.query.get("questionSetId", [None])[0] or self._question_set_id(request.path_params["case_id"])
+        items = self.question_variants.list_active_proposals(
+            request.path_params["case_id"],
+            question_set_id,
+            request.path_params["question_id"],
+        )
+        return _ok(request, {"items": items})
 
     def discard_question_variant(self, request: Request) -> Response:
         question_set_id = self.question_variants.get_proposal_by_id(
