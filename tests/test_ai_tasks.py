@@ -18,6 +18,12 @@ class FakeProvider:
             raise self.error
         return self.result
 
+    def generate_question_variant(self, payload):
+        self.calls += 1
+        if self.error:
+            raise self.error
+        return self.result
+
     def evaluate_answers(self, payload):
         return self.result
 

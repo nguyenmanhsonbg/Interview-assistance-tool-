@@ -21,6 +21,7 @@ from app.services.evaluation_service import EvaluationService
 from app.services.interview_brief_service import InterviewBriefService
 from app.services.interview_service import InterviewService
 from app.services.question_generation_service import QuestionGenerationService
+from app.services.question_variant_service import QuestionVariantService
 
 
 class _TaskProcessor:
@@ -36,6 +37,9 @@ class _TaskProcessor:
         self.questions = QuestionGenerationService(
             database, schema_root, provider_name=provider_name, model_name=model_name
         )
+        self.question_variants = QuestionVariantService(
+            database, schema_root, provider_name=provider_name, model_name=model_name
+        )
         self.evaluations = EvaluationService(
             database, schema_root, provider_name=provider_name, model_name=model_name
         )
@@ -49,6 +53,8 @@ class _TaskProcessor:
         try:
             if task["taskType"] == "GENERATE_QUESTIONS":
                 return self.questions.process(task_id, provider)
+            if task["taskType"] == "GENERATE_QUESTION_VARIANT":
+                return self.question_variants.process(task_id, provider)
             if task["taskType"] in {"EVALUATE_ASSESSMENT", "GENERATE_BRIEF"}:
                 result = self.evaluations.process(task_id, provider)
                 if (
@@ -72,6 +78,9 @@ class _UnavailableProvider:
         )
 
     def generate_questions(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._raise()
+
+    def generate_question_variant(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._raise()
 
     def evaluate_answers(self, payload: dict[str, Any]) -> dict[str, Any]:

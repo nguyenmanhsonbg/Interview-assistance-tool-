@@ -33,6 +33,7 @@ class AITaskRepository(RepositoryBase):
                      OR
                      (t.assessment_snapshot_id IS NOT NULL
                       AND ic.refined_flow_status='AI_ANALYZING')
+                     OR t.task_type='GENERATE_QUESTION_VARIANT'
                    )
                    ORDER BY t.created_at, t.id"""
             )
@@ -59,16 +60,18 @@ class AITaskRepository(RepositoryBase):
         )
         return None if row is None else _result_dict(row)
 
-    def insert(self, connection: sqlite3.Connection, *, task_id: str, case_id: str, assessment_attempt_id: str | None, assessment_snapshot_id: str | None, task_type: str, idempotency_key: str, input_fingerprint: str, input_manifest: dict[str, Any], provider: str | None, model: str | None, prompt_key: str, prompt_version: str, schema_version: str, max_retry: int, phase: str | None = None) -> None:
+    def insert(self, connection: sqlite3.Connection, *, task_id: str, case_id: str, assessment_attempt_id: str | None, assessment_snapshot_id: str | None, task_type: str, idempotency_key: str, input_fingerprint: str, input_manifest: dict[str, Any], provider: str | None, model: str | None, prompt_key: str, prompt_version: str, schema_version: str, max_retry: int, phase: str | None = None, source_question_id: str | None = None) -> None:
         connection.execute(
             """INSERT INTO ai_tasks(
                 id, interview_case_id, assessment_attempt_id, assessment_snapshot_id, task_type,
                 idempotency_key, input_fingerprint, input_manifest_json,
-                provider, model, prompt_key, prompt_version, schema_version, max_retry, phase
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                provider, model, prompt_key, prompt_version, schema_version, max_retry,
+                phase, source_question_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (task_id, case_id, assessment_attempt_id, assessment_snapshot_id, task_type, idempotency_key,
              input_fingerprint, json.dumps(input_manifest, ensure_ascii=False, separators=(",", ":")),
-             provider, model, prompt_key, prompt_version, schema_version, max_retry, phase),
+             provider, model, prompt_key, prompt_version, schema_version, max_retry, phase,
+             source_question_id),
         )
 
     def set_phase(self, connection: sqlite3.Connection, task_id: str, phase: str) -> None:
@@ -98,11 +101,22 @@ class AITaskRepository(RepositoryBase):
         )
 
     def complete(self, connection: sqlite3.Connection, task: dict[str, Any], *, result_type: str, payload: dict[str, Any]) -> str:
-        previous = connection.execute(
-            """SELECT id, version_no FROM ai_results
-               WHERE interview_case_id=? AND result_type=? AND is_current=1""",
-            (task["interviewCaseId"], result_type),
-        ).fetchone()
+        manifest = task.get("inputManifest", {})
+        question_set_id = manifest.get("questionSetId")
+        source_question_id = task.get("sourceQuestionId") or manifest.get("sourceQuestionId")
+        if result_type == "QUESTION_VARIANT":
+            previous = connection.execute(
+                """SELECT id, version_no FROM ai_results
+                   WHERE interview_case_id=? AND result_type=?
+                     AND question_set_id=? AND source_question_id=? AND is_current=1""",
+                (task["interviewCaseId"], result_type, question_set_id, source_question_id),
+            ).fetchone()
+        else:
+            previous = connection.execute(
+                """SELECT id, version_no FROM ai_results
+                   WHERE interview_case_id=? AND result_type=? AND is_current=1""",
+                (task["interviewCaseId"], result_type),
+            ).fetchone()
         version = 1 if previous is None else previous["version_no"] + 1
         if previous is not None:
             connection.execute("UPDATE ai_results SET is_current=0 WHERE id=?", (previous["id"],))
@@ -110,11 +124,12 @@ class AITaskRepository(RepositoryBase):
         connection.execute(
             """INSERT INTO ai_results(
                 id, ai_task_id, interview_case_id, assessment_attempt_id, assessment_snapshot_id,
-                result_type, version_no, supersedes_result_id, payload_json,
-                confidence, is_current
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+                question_set_id, source_question_id, result_type, version_no,
+                supersedes_result_id, payload_json, confidence, is_current
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
             (result_id, task["id"], task["interviewCaseId"], task["assessmentAttemptId"], task["assessmentSnapshotId"],
-             result_type, version, None if previous is None else previous["id"],
+             question_set_id, source_question_id, result_type, version,
+             None if previous is None else previous["id"],
              json.dumps(payload, ensure_ascii=False, separators=(",", ":")), payload.get("confidence")),
         )
         connection.execute(
@@ -129,6 +144,7 @@ def _task_dict(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": row["id"], "interviewCaseId": row["interview_case_id"],
         "assessmentAttemptId": row["assessment_attempt_id"], "assessmentSnapshotId": row["assessment_snapshot_id"], "taskType": row["task_type"],
+        "sourceQuestionId": row["source_question_id"],
         "status": row["status"], "phase": row["phase"], "idempotencyKey": row["idempotency_key"],
         "inputFingerprint": row["input_fingerprint"], "inputManifest": json.loads(row["input_manifest_json"]),
         "provider": row["provider"], "model": row["model"], "promptKey": row["prompt_key"],
@@ -142,6 +158,7 @@ def _task_dict(row: sqlite3.Row) -> dict[str, Any]:
 def _result_dict(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": row["id"], "aiTaskId": row["ai_task_id"], "resultType": row["result_type"],
+        "questionSetId": row["question_set_id"], "sourceQuestionId": row["source_question_id"],
         "assessmentSnapshotId": row["assessment_snapshot_id"],
         "versionNo": row["version_no"], "payload": json.loads(row["payload_json"]),
         "confidence": row["confidence"], "isCurrent": bool(row["is_current"]), "createdAt": row["created_at"],
