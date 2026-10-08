@@ -14,6 +14,7 @@ from app.domain.errors import ResourceNotFound, StateConflict, ValidationError
 from app.repositories.audit import append_audit
 from app.repositories.question_variants import QuestionVariantRepository
 from app.services.ai_task_service import AITaskService
+from app.services.question_service import _validate_questions
 
 
 MAX_VARIANT_PROMPT_CHARS = 2000
@@ -159,6 +160,145 @@ class QuestionVariantService:
             case_id, question_set_id, question_id, proposal_id
         )
 
+    def discard_proposal(
+        self,
+        case_id: str,
+        question_set_id: str,
+        question_id: str,
+        proposal_id: str,
+    ) -> dict[str, Any]:
+        with self.database.transaction() as connection:
+            question_set = self._lock_check(
+                connection, case_id, question_set_id, question_id
+            )
+            changed = self.repository.mark_discarded(
+                connection,
+                case_id=case_id,
+                question_set_id=question_set_id,
+                question_id=question_id,
+                proposal_id=proposal_id,
+            )
+            if changed:
+                append_audit(
+                    connection,
+                    actor_type="COMMITTEE",
+                    action="QUESTION_VARIANT_DISCARDED",
+                    entity_type="QUESTION_VARIANT_PROPOSAL",
+                    entity_id=proposal_id,
+                    metadata={"questionSetId": question_set["id"], "sourceQuestionId": question_id},
+                )
+        return self.get_proposal(case_id, question_set_id, question_id, proposal_id)
+
+    def apply_proposal(
+        self,
+        case_id: str,
+        question_set_id: str,
+        question_id: str,
+        proposal_id: str,
+        expected_question_set_updated_at: str,
+        expected_source_fingerprint: str,
+    ) -> dict[str, Any]:
+        with self.database.transaction() as connection:
+            question_set = self._lock_check(
+                connection, case_id, question_set_id, question_id
+            )
+            if question_set["updated_at"] != expected_question_set_updated_at:
+                raise StateConflict("Question variant proposal is stale")
+            source = _source_from_connection(
+                connection, case_id, question_set_id, question_id
+            )
+            current_fingerprint = _fingerprint(source["sourceFingerprintInput"])
+            if current_fingerprint != expected_source_fingerprint:
+                raise StateConflict("Question variant proposal source is stale")
+            proposal = connection.execute(
+                """SELECT p.*, r.payload_json
+                   FROM question_variant_proposals p
+                   JOIN ai_results r ON r.id=p.ai_result_id
+                   WHERE p.id=? AND p.interview_case_id=? AND p.question_set_id=?
+                     AND p.source_question_id=?""",
+                (proposal_id, case_id, question_set_id, question_id),
+            ).fetchone()
+            if proposal is None:
+                raise ResourceNotFound("Question variant proposal not found")
+            if proposal["status"] != "PROPOSED":
+                raise StateConflict("Question variant proposal is no longer proposed")
+            payload = json.loads(proposal["payload_json"])
+            self.tasks.schemas.validate(
+                "QUESTION_VARIANT",
+                payload,
+                context={
+                    "questionSetId": question_set_id,
+                    "sourceQuestionId": question_id,
+                },
+            )
+            current_questions = [
+                _question_from_row(row)
+                for row in connection.execute(
+                    "SELECT * FROM questions WHERE question_set_id=? ORDER BY display_order",
+                    (question_set_id,),
+                ).fetchall()
+            ]
+            replacement = next(
+                question for question in current_questions if question["id"] == question_id
+            )
+            replacement.update(
+                {
+                    "questionText": payload["variant"]["questionText"],
+                    "purpose": payload["variant"]["purpose"],
+                    "nextStepObjective": payload["variant"]["nextStepObjective"],
+                    "expectedEvidence": payload["variant"]["expectedEvidence"],
+                    "rubric": payload["variant"]["rubric"],
+                }
+            )
+            _validate_questions(current_questions)
+            connection.execute(
+                """UPDATE questions SET question_text=?, purpose=?, next_step_objective=?,
+                   expected_evidence=?, rubric_json=? WHERE id=? AND question_set_id=?""",
+                (
+                    replacement["questionText"],
+                    replacement["purpose"],
+                    replacement["nextStepObjective"],
+                    replacement["expectedEvidence"],
+                    json.dumps(replacement["rubric"], ensure_ascii=False, separators=(",", ":")),
+                    question_id,
+                    question_set_id,
+                ),
+            )
+            connection.execute(
+                """UPDATE question_sets SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                   WHERE id=?""",
+                (question_set_id,),
+            )
+            self.repository.mark_applied(
+                connection,
+                case_id=case_id,
+                question_set_id=question_set_id,
+                question_id=question_id,
+                proposal_id=proposal_id,
+            )
+            after_source = _source_from_connection(
+                connection, case_id, question_set_id, question_id
+            )
+            append_audit(
+                connection,
+                actor_type="COMMITTEE",
+                action="QUESTION_VARIANT_APPLIED",
+                entity_type="QUESTION_VARIANT_PROPOSAL",
+                entity_id=proposal_id,
+                metadata={
+                    "questionSetId": question_set_id,
+                    "sourceQuestionId": question_id,
+                    "beforeFingerprint": current_fingerprint,
+                    "afterFingerprint": _fingerprint(after_source["sourceFingerprintInput"]),
+                },
+            )
+        return {
+            "question": replacement,
+            "proposal": self.get_proposal(
+                case_id, question_set_id, question_id, proposal_id
+            ),
+        }
+
     def provider_payload(self, task: dict[str, Any]) -> dict[str, Any]:
         manifest = task["inputManifest"]
         case_id = task["interviewCaseId"]
@@ -236,64 +376,32 @@ class QuestionVariantService:
         self, case_id: str, question_set_id: str, question_id: str
     ) -> dict[str, Any]:
         with self.database.connection() as connection:
-            row = connection.execute(
-                """SELECT qs.id AS question_set_id, qs.interview_case_id,
-                          qs.status AS question_set_status, qs.updated_at AS question_set_updated_at,
-                          q.*, c.full_name
-                   FROM question_sets qs
-                   JOIN questions q ON q.question_set_id=qs.id
-                   JOIN interview_cases ic ON ic.id=qs.interview_case_id
-                   JOIN candidates c ON c.id=ic.candidate_id
-                   WHERE qs.id=? AND qs.interview_case_id=? AND q.id=?""",
-                (question_set_id, case_id, question_id),
-            ).fetchone()
-            if row is None:
-                raise ResourceNotFound("Question source not found")
-            if row["question_set_status"] not in {"DRAFT", "GENERATED"}:
-                raise StateConflict("Question Set is locked")
             attempt = connection.execute(
                 "SELECT 1 FROM assessment_attempts WHERE interview_case_id=? LIMIT 1",
                 (case_id,),
             ).fetchone()
             if attempt is not None:
                 raise StateConflict("Question Set is locked after assessment start")
-            documents = [
-                dict(document)
-                for document in connection.execute(
-                    """SELECT id, document_type, version_no, content_sha256
-                       FROM documents
-                       WHERE interview_case_id=? AND is_current=1 AND is_ai_eligible=1
-                       ORDER BY document_type""",
-                    (case_id,),
-                ).fetchall()
-            ]
-        source_question = {
-            "id": row["id"],
-            "displayOrder": row["display_order"],
-            "questionText": row["question_text"],
-            "competencyKey": row["competency_key"],
-            "sourceKind": row["source_kind"],
-            "questionCategory": row["question_category"],
-            "purpose": row["purpose"],
-            "nextStepObjective": row["next_step_objective"],
-            "questionType": row["question_type"],
-            "difficulty": row["difficulty"],
-            "expectedEvidence": row["expected_evidence"],
-            "rubric": json.loads(row["rubric_json"]),
-            "isRequired": bool(row["is_required"]),
-            "estimatedSeconds": row["estimated_seconds"],
-        }
-        source_fingerprint_input = {
-            "questionSetId": question_set_id,
-            "questionSetUpdatedAt": row["question_set_updated_at"],
-            "sourceQuestion": source_question,
-            "documents": documents,
-        }
-        return {
-            "sourceQuestion": source_question,
-            "documents": documents,
-            "sourceFingerprintInput": source_fingerprint_input,
-        }
+            return _source_from_connection(connection, case_id, question_set_id, question_id)
+
+    def _lock_check(self, connection, case_id: str, question_set_id: str, question_id: str):
+        row = connection.execute(
+            """SELECT qs.* FROM question_sets qs
+               JOIN questions q ON q.question_set_id=qs.id AND q.id=?
+               WHERE qs.id=? AND qs.interview_case_id=?""",
+            (question_id, question_set_id, case_id),
+        ).fetchone()
+        if row is None:
+            raise ResourceNotFound("Question source not found")
+        if row["status"] not in {"DRAFT", "GENERATED"}:
+            raise StateConflict("Question Set is locked")
+        attempt = connection.execute(
+            "SELECT 1 FROM assessment_attempts WHERE interview_case_id=? LIMIT 1",
+            (case_id,),
+        ).fetchone()
+        if attempt is not None:
+            raise StateConflict("Question Set is locked after assessment start")
+        return row
 
 
 def _fingerprint(value: Any) -> str:
@@ -302,3 +410,62 @@ def _fingerprint(value: Any) -> str:
             "utf-8"
         )
     ).hexdigest()
+
+
+def _source_from_connection(connection, case_id: str, question_set_id: str, question_id: str):
+    row = connection.execute(
+        """SELECT qs.id AS question_set_id, qs.interview_case_id,
+                  qs.status AS question_set_status, qs.updated_at AS question_set_updated_at,
+                  q.*, c.full_name
+           FROM question_sets qs
+           JOIN questions q ON q.question_set_id=qs.id
+           JOIN interview_cases ic ON ic.id=qs.interview_case_id
+           JOIN candidates c ON c.id=ic.candidate_id
+           WHERE qs.id=? AND qs.interview_case_id=? AND q.id=?""",
+        (question_set_id, case_id, question_id),
+    ).fetchone()
+    if row is None:
+        raise ResourceNotFound("Question source not found")
+    if row["question_set_status"] not in {"DRAFT", "GENERATED"}:
+        raise StateConflict("Question Set is locked")
+    documents = [
+        dict(document)
+        for document in connection.execute(
+            """SELECT id, document_type, version_no, content_sha256
+               FROM documents
+               WHERE interview_case_id=? AND is_current=1 AND is_ai_eligible=1
+               ORDER BY document_type""",
+            (case_id,),
+        ).fetchall()
+    ]
+    source_question = _question_from_row(row)
+    source_fingerprint_input = {
+        "questionSetId": question_set_id,
+        "questionSetUpdatedAt": row["question_set_updated_at"],
+        "sourceQuestion": source_question,
+        "documents": documents,
+    }
+    return {
+        "sourceQuestion": source_question,
+        "documents": documents,
+        "sourceFingerprintInput": source_fingerprint_input,
+    }
+
+
+def _question_from_row(row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "displayOrder": row["display_order"],
+        "questionText": row["question_text"],
+        "competencyKey": row["competency_key"],
+        "sourceKind": row["source_kind"],
+        "questionCategory": row["question_category"],
+        "purpose": row["purpose"],
+        "nextStepObjective": row["next_step_objective"],
+        "questionType": row["question_type"],
+        "difficulty": row["difficulty"],
+        "expectedEvidence": row["expected_evidence"],
+        "rubric": json.loads(row["rubric_json"]),
+        "isRequired": bool(row["is_required"]),
+        "estimatedSeconds": row["estimated_seconds"],
+    }

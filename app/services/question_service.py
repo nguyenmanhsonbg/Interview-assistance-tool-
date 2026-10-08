@@ -105,6 +105,14 @@ class QuestionService:
                 entity_id=question_set_id,
                 metadata={"questionCount": len(normalized)},
             )
+            append_audit(
+                connection,
+                actor_type="COMMITTEE",
+                action="QUESTION_MANUALLY_EDITED",
+                entity_type="QUESTION_SET",
+                entity_id=question_set_id,
+                metadata={"questionCount": len(normalized)},
+            )
         return self.repository.get_set(question_set_id)
 
     def approve(self, question_set_id: str, member_id: str) -> dict[str, Any]:

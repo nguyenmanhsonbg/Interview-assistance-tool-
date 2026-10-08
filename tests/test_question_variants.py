@@ -41,19 +41,25 @@ class QuestionVariantTests(MigratedDatabaseFixture, unittest.TestCase):
                 (self.case["id"],),
             )
             for number in range(1, 10):
+                category = (
+                    "FOUNDATION" if number <= 3
+                    else "APPLICATION" if number <= 7
+                    else "DEEP_DIVE"
+                )
                 connection.execute(
                     """INSERT INTO questions(
                         id, question_set_id, display_order, question_text,
                         competency_key, source_kind, question_category, purpose,
                         next_step_objective, question_type, difficulty,
                         expected_evidence, rubric_json, is_required, estimated_seconds
-                    ) VALUES (?, 'set-1', ?, ?, 'backend', 'AI', 'APPLICATION',
+                    ) VALUES (?, 'set-1', ?, ?, 'backend', 'AI', ?,
                         'Purpose', 'Objective', 'SCENARIO', 'MEDIUM',
                         'Evidence', ?, 1, 60)""",
                     (
                         f"question-{number}",
                         number,
                         f"Question {number}",
+                        category,
                         '{"score0":"No evidence","score1":"Weak","score2":"Basic","score3":"Good","score4":"Excellent"}',
                     ),
                 )
@@ -159,6 +165,118 @@ class QuestionVariantTests(MigratedDatabaseFixture, unittest.TestCase):
         self.assertIn("repairInstruction", provider.payloads[1])
         self.assertEqual("Question 1", self._question_text("question-1"))
 
+    def test_apply_replaces_only_content_and_marks_proposal_applied(self):
+        from app.repositories.questions import QuestionRepository
+
+        service = self.make_service()
+        task = service.request_variant(
+            self.case["id"], "set-1", "question-1", "SAME_GROUP",
+            None, "apply-key",
+        )
+        processed = service.process(task["id"], VariantProvider())
+        before_set = QuestionRepository(self.database).get_set("set-1")
+        proposal = processed["proposal"]
+
+        applied = service.apply_proposal(
+            self.case["id"],
+            "set-1",
+            "question-1",
+            proposal["id"],
+            before_set["updatedAt"],
+            proposal["sourceFingerprint"],
+        )
+
+        question = applied["question"]
+        self.assertEqual("question-1", question["id"])
+        self.assertEqual(1, question["displayOrder"])
+        self.assertEqual("backend", question["competencyKey"])
+        self.assertEqual("FOUNDATION", question["questionCategory"])
+        self.assertEqual("SCENARIO", question["questionType"])
+        self.assertEqual("MEDIUM", question["difficulty"])
+        self.assertNotEqual("Question 1", question["questionText"])
+        self.assertEqual("APPLIED", applied["proposal"]["status"])
+        self.assertEqual("QUESTION_VARIANT_APPLIED", self._latest_audit_action())
+
+    def test_discard_is_idempotent_and_never_changes_question(self):
+        service = self.make_service()
+        task = service.request_variant(
+            self.case["id"], "set-1", "question-1", "SAME_GROUP",
+            None, "discard-key",
+        )
+        processed = service.process(task["id"], VariantProvider())
+        proposal_id = processed["proposalId"]
+
+        discarded = service.discard_proposal(
+            self.case["id"], "set-1", "question-1", proposal_id
+        )
+        repeated = service.discard_proposal(
+            self.case["id"], "set-1", "question-1", proposal_id
+        )
+
+        self.assertEqual("DISCARDED", discarded["status"])
+        self.assertEqual("DISCARDED", repeated["status"])
+        self.assertEqual("Question 1", self._question_text("question-1"))
+
+    def test_apply_rejects_stale_manual_edit_and_preserves_manual_content(self):
+        from app.domain.errors import StateConflict
+        from app.repositories.questions import QuestionRepository
+        from app.services.question_service import QuestionService
+
+        service = self.make_service()
+        task = service.request_variant(
+            self.case["id"], "set-1", "question-1", "SAME_GROUP",
+            None, "stale-key",
+        )
+        processed = service.process(task["id"], VariantProvider())
+        before_set = QuestionRepository(self.database).get_set("set-1")
+        proposal = processed["proposal"]
+        edited = before_set["questions"]
+        edited[0]["questionText"] = "Manual edit wins"
+        QuestionService(self.database).update_draft("set-1", edited)
+
+        with self.assertRaises(StateConflict):
+            service.apply_proposal(
+                self.case["id"], "set-1", "question-1", proposal["id"],
+                before_set["updatedAt"], proposal["sourceFingerprint"],
+            )
+        self.assertEqual("Manual edit wins", self._question_text("question-1"))
+        self.assertIn("QUESTION_MANUALLY_EDITED", self._audit_actions())
+
+    def test_apply_rejects_approved_and_assessment_started_question_sets(self):
+        from app.domain.errors import StateConflict
+        from app.repositories.questions import QuestionRepository
+
+        service = self.make_service()
+        approved_task = service.request_variant(
+            self.case["id"], "set-1", "question-1", "SAME_GROUP",
+            None, "approved-lock-key",
+        )
+        approved_processed = service.process(approved_task["id"], VariantProvider())
+        approved_set = QuestionRepository(self.database).get_set("set-1")
+        with self.database.transaction() as connection:
+            connection.execute(
+                "UPDATE question_sets SET status='APPROVED' WHERE id='set-1'"
+            )
+        with self.assertRaises(StateConflict):
+            service.apply_proposal(
+                self.case["id"], "set-1", "question-1",
+                approved_processed["proposalId"], approved_set["updatedAt"],
+                approved_processed["proposal"]["sourceFingerprint"],
+            )
+
+        with self.database.transaction() as connection:
+            connection.execute("UPDATE question_sets SET status='GENERATED' WHERE id='set-1'")
+            connection.execute(
+                """INSERT INTO assessment_attempts(id, interview_case_id, question_set_id, status)
+                   VALUES ('attempt-1', ?, 'set-1', 'ASSESSMENT_IN_PROGRESS')""",
+                (self.case["id"],),
+            )
+        with self.assertRaises(StateConflict):
+            service.request_variant(
+                self.case["id"], "set-1", "question-1", "SAME_GROUP",
+                None, "assessment-lock-key",
+            )
+
     def _question_text(self, question_id):
         with self.database.connection() as connection:
             return connection.execute(
@@ -170,6 +288,13 @@ class QuestionVariantTests(MigratedDatabaseFixture, unittest.TestCase):
             return connection.execute(
                 "SELECT action FROM audit_logs ORDER BY created_at DESC, id DESC LIMIT 1"
             ).fetchone()[0]
+
+    def _audit_actions(self):
+        with self.database.connection() as connection:
+            return [
+                row[0]
+                for row in connection.execute("SELECT action FROM audit_logs").fetchall()
+            ]
 
 
 if __name__ == "__main__":

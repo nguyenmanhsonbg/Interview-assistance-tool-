@@ -108,6 +108,34 @@ class QuestionVariantRepository(RepositoryBase):
             return False
         return True
 
+    def mark_applied(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        case_id: str,
+        question_set_id: str,
+        question_id: str,
+        proposal_id: str,
+    ) -> None:
+        cursor = connection.execute(
+            """UPDATE question_variant_proposals
+               SET status='APPLIED', applied_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+                   updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+               WHERE id=? AND interview_case_id=? AND question_set_id=?
+                 AND source_question_id=? AND status='PROPOSED'""",
+            (proposal_id, case_id, question_set_id, question_id),
+        )
+        if cursor.rowcount == 0:
+            row = connection.execute(
+                """SELECT status FROM question_variant_proposals
+                   WHERE id=? AND interview_case_id=? AND question_set_id=?
+                     AND source_question_id=?""",
+                (proposal_id, case_id, question_set_id, question_id),
+            ).fetchone()
+            if row is None:
+                raise ResourceNotFound("Question variant proposal not found")
+            raise StateConflict("Question variant proposal is no longer proposed")
+
 
 def _proposal_dict(row: sqlite3.Row) -> dict[str, Any]:
     payload = json.loads(row["payload_json"])
