@@ -298,10 +298,22 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("function openQuestionAdditionDetails(", scripts)
         self.assertIn("question-addition-summary", styles + scripts)
         self.assertIn("question-addition-detail", styles + scripts)
+        self.assertIn("question-addition-columns", styles + scripts)
+        self.assertIn("question-addition-question", styles + scripts)
+        self.assertIn("question-addition-rubric", styles + scripts)
+        self.assertIn("question-addition-actions", styles + scripts)
+        self.assertIn("question-addition-detail-modal { width: min(960px", styles)
+        self.assertIn("grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr)", styles)
         self.assertIn('setAttribute("aria-haspopup", "dialog")', scripts)
         self.assertIn("openQuestionAdditionDetails(proposal, questionSet, caseId, onRefresh)", scripts)
         self.assertNotIn("renderQuestionAdditionFields(question)", summary_renderer)
         self.assertNotIn("T\u00f3m t\u1eaft c\u00e2u h\u1ecfi", summary_renderer)
+        fields_start = scripts.index("function renderQuestionAdditionFields")
+        detail_start = scripts.index("function openQuestionAdditionDetails")
+        fields_renderer = scripts[fields_start:detail_start]
+        self.assertNotIn("question?.rubric", fields_renderer)
+        self.assertIn('rubric.classList.add("question-addition-rubric")', scripts)
+        self.assertIn("rubric.open = false", scripts)
 
     def test_questions_workspace_restores_selected_question_after_refresh(self):
         root = Path(__file__).resolve().parents[1] / "web"

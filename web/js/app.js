@@ -1052,7 +1052,6 @@ function renderQuestionAdditionFields(question) {
     row.append(element("span", label, "detail-label"), element("span", safeText(value)));
     fields.append(row);
   }
-  if (question?.rubric) fields.append(renderRubric(question.rubric));
   return fields;
 }
 
@@ -1085,7 +1084,14 @@ function openQuestionAdditionDetails(proposal, questionSet, caseId, onRefresh) {
   );
   const suggested = element("div", undefined, "stack");
   suggested.append(element("strong", "Câu hỏi đề xuất"), element("div", safeText(question.questionText), "answer-text"));
-  const actions = element("div", undefined, "actions");
+  const questionInfo = element("section", undefined, "stack question-addition-question");
+  questionInfo.append(suggested, renderQuestionAdditionFields(question));
+  const rubric = renderRubric(question.rubric || {});
+  rubric.classList.add("question-addition-rubric");
+  rubric.open = false;
+  const columns = element("div", undefined, "question-addition-columns");
+  columns.append(questionInfo, rubric);
+  const actions = element("div", undefined, "actions question-addition-actions");
   const apply = button("Dùng câu hỏi này", async () => {
     try {
       await apiFetch(questionAdditionPath(caseId, proposal.proposalId) + "/apply", {
@@ -1131,7 +1137,7 @@ function openQuestionAdditionDetails(proposal, questionSet, caseId, onRefresh) {
     await onRefresh();
   }, "secondary");
   actions.append(apply, regenerate, discard);
-  card.append(heading, meta, suggested, renderQuestionAdditionFields(question), actions);
+  card.append(heading, meta, columns, actions);
   modal.append(card);
   backdrop.append(modal);
   backdrop.addEventListener("click", (event) => {
