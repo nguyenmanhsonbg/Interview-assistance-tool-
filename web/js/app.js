@@ -1178,7 +1178,7 @@ function loadQuestionAdditionState(host, groupKey, questionSet, caseId, onRefres
       state.taskId,
       host,
       onRefresh,
-      "AI Ä‘ang thÃªm cÃ¢u há»i",
+      "AI đang thêm câu hỏi",
       (result) => {
         const proposalId = result?.task?.additionProposalId;
         if (proposalId) setState({ activeQuestionAddition: { ...state, taskId: null, proposalId } });
@@ -1192,13 +1192,13 @@ function loadQuestionAdditionState(host, groupKey, questionSet, caseId, onRefres
     return;
   }
   if (state?.proposalId) {
-    host.append(element("p", "Äang táº£i Ä‘á» xuáº¥t Ä‘Ã£ táº¡o...", "muted"));
+    host.append(element("p", "Đang tải đề xuất đã tạo...", "muted"));
     apiFetch(questionAdditionPath(caseId, state.proposalId))
       .then((proposal) => renderQuestionAdditionProposal(host, proposal, questionSet, caseId, onRefresh))
       .catch((error) => showError(error, host));
     return;
   }
-  host.append(element("p", "Äang kiá»ƒm tra Ä‘á» xuáº¥t Ä‘Ã£ lÆ°u...", "muted"));
+  host.append(element("p", "Đang kiểm tra đề xuất đã lưu...", "muted"));
   apiFetch(questionAdditionPath(caseId) + "?questionSetId=" + encodeURIComponent(questionSet.id) + "&questionCategory=" + encodeURIComponent(groupKey))
     .then((result) => {
       const current = activeQuestionAddition(caseId, questionSet.id, groupKey);

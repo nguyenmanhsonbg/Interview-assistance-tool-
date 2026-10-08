@@ -287,6 +287,22 @@ class FrontendContractTests(unittest.TestCase):
         for marker in ("\u00c3", "\u00c4", "\u0081", "\u008f"):
             self.assertNotIn(marker, detail_copy)
 
+    def test_question_addition_progress_uses_valid_vietnamese_copy(self):
+        root = Path(__file__).resolve().parents[1] / "web"
+        scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
+        progress_start = scripts.index("function loadQuestionAdditionState")
+        progress_end = scripts.index("function questionVariantPath")
+        progress_copy = scripts[progress_start:progress_end]
+
+        for marker in (
+            "AI đang thêm câu hỏi",
+            "Đang tải đề xuất đã tạo...",
+            "Đang kiểm tra đề xuất đã lưu...",
+        ):
+            self.assertIn(marker, progress_copy)
+        for marker in ("Ã", "Ä", "Â", "\ufffd"):
+            self.assertNotIn(marker, progress_copy)
+
     def test_question_addition_proposal_uses_summary_card_and_detail_modal(self):
         root = Path(__file__).resolve().parents[1] / "web"
         styles = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.css"))
