@@ -1056,9 +1056,22 @@ function renderQuestionAdditionFields(question) {
   return fields;
 }
 
-function renderQuestionAdditionProposal(host, proposal, questionSet, caseId, onRefresh) {
-  host.replaceChildren();
+function openQuestionAdditionDetails(proposal, questionSet, caseId, onRefresh) {
   if (proposal.status !== "PROPOSED") return;
+  const opener = document.activeElement;
+  const backdrop = element("div", undefined, "modal-backdrop question-addition-detail");
+  const modal = element("section", undefined, "modal question-addition-detail-modal");
+  const host = modal;
+  modal.setAttribute("role", "dialog");
+  modal.setAttribute("aria-modal", "true");
+  const closeModal = () => {
+    document.removeEventListener("keydown", keydownHandler);
+    backdrop.remove();
+    opener?.focus?.();
+  };
+  const keydownHandler = (event) => {
+    if (event.key === "Escape") closeModal();
+  };
   const card = element("section", undefined, "card stack question-addition-proposal");
   const heading = element("div", undefined, "question-addition-status");
   heading.append(element("h3", "CÃ¢u há»i má»›i Ä‘á» xuáº¥t"), element("span", safeText(proposal.status), "badge warning"));
@@ -1085,6 +1098,7 @@ function renderQuestionAdditionProposal(host, proposal, questionSet, caseId, onR
       });
       clearActiveQuestionAddition(caseId, questionSet.id, proposal.targetCategory);
       await onRefresh();
+      closeModal();
     } catch (error) {
       await onRefresh();
       if (["STATE_CONFLICT", "QUESTION_SET_STALE"].includes(error.code)) {
@@ -1097,6 +1111,7 @@ function renderQuestionAdditionProposal(host, proposal, questionSet, caseId, onR
   const regenerate = button("Táº¡o láº¡i", async () => {
     await apiFetch(questionAdditionPath(caseId, proposal.proposalId) + "/discard", { method: "POST" });
     clearActiveQuestionAddition(caseId, questionSet.id, proposal.targetCategory);
+    closeModal();
     if (proposal.mode === "USER_PROMPT") {
       openQuestionAdditionPrompt(proposal.targetCategory, {
         onSubmit: async (prompt) => {
@@ -1112,10 +1127,39 @@ function renderQuestionAdditionProposal(host, proposal, questionSet, caseId, onR
   const discard = button("Bá» qua", async () => {
     await apiFetch(questionAdditionPath(caseId, proposal.proposalId) + "/discard", { method: "POST" });
     clearActiveQuestionAddition(caseId, questionSet.id, proposal.targetCategory);
+    closeModal();
     await onRefresh();
   }, "secondary");
   actions.append(apply, regenerate, discard);
   card.append(heading, meta, suggested, renderQuestionAdditionFields(question), actions);
+  modal.append(card);
+  backdrop.append(modal);
+  backdrop.addEventListener("click", (event) => {
+    if (event.target === backdrop) closeModal();
+  });
+  document.addEventListener("keydown", keydownHandler);
+  document.body.append(backdrop);
+  apply.focus();
+}
+
+function renderQuestionAdditionProposal(host, proposal, questionSet, caseId, onRefresh) {
+  host.replaceChildren();
+  if (proposal.status !== "PROPOSED") return;
+  const question = proposal.question || {};
+  const card = button("", () => openQuestionAdditionDetails(proposal, questionSet, caseId, onRefresh), "master-item question-addition-proposal question-addition-summary");
+  card.setAttribute("aria-haspopup", "dialog");
+  card.setAttribute("aria-label", "Xem chi tiết đề xuất câu hỏi");
+  const heading = element("div", undefined, "question-addition-status");
+  heading.append(element("h3", "Câu hỏi mới"), element("span", safeText(proposal.status), "badge warning"));
+  const summary = element("div", undefined, "stack-sm");
+  summary.append(element("strong", "Tóm tắt câu hỏi"), element("span", safeText(question.questionText), "question-addition-summary-text"));
+  const meta = element("div", undefined, "actions");
+  meta.append(
+    element("span", categoryLabel(proposal.targetCategory), "badge"),
+    element("span", safeText(question.questionType), "badge"),
+    element("span", safeText(question.difficulty), "badge"),
+  );
+  card.append(heading, summary, meta);
   host.append(card);
 }
 

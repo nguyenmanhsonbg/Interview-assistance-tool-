@@ -53,6 +53,9 @@
 .question-addition-progress { display: grid; gap: 10px; }
 .question-addition-choice .modal { width: min(440px, 100%); }
 .question-addition-proposal { border-color: var(--ui-primary); background: var(--ui-primary-soft); }
+.question-addition-summary { gap: 8px; }
+.question-addition-summary-text { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.question-addition-detail-modal { width: min(760px, 100%); max-height: min(90vh, 760px); overflow: auto; }
 .question-addition-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .question-addition-status h3 { margin: 0; }
 .question-addition-fields { display: grid; gap: 0; padding-top: 4px; border-top: 1px solid var(--ui-border); }

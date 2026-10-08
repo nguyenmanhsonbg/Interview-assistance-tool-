@@ -273,6 +273,21 @@ class FrontendContractTests(unittest.TestCase):
             self.assertIn(marker, popup_copy)
         self.assertLess(choice_start, prompt_start)
 
+    def test_question_addition_proposal_uses_summary_card_and_detail_modal(self):
+        root = Path(__file__).resolve().parents[1] / "web"
+        styles = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.css"))
+        scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
+        proposal_start = scripts.index("function renderQuestionAdditionProposal")
+        load_start = scripts.index("function loadQuestionAdditionState")
+        summary_renderer = scripts[proposal_start:load_start]
+
+        self.assertIn("function openQuestionAdditionDetails(", scripts)
+        self.assertIn("question-addition-summary", styles + scripts)
+        self.assertIn("question-addition-detail", styles + scripts)
+        self.assertIn('setAttribute("aria-haspopup", "dialog")', scripts)
+        self.assertIn("openQuestionAdditionDetails(proposal, questionSet, caseId, onRefresh)", scripts)
+        self.assertNotIn("renderQuestionAdditionFields(question)", summary_renderer)
+
     def test_questions_workspace_restores_selected_question_after_refresh(self):
         root = Path(__file__).resolve().parents[1] / "web"
         scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
