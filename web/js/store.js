@@ -6,6 +6,7 @@ const state = {
   currentSnapshotId: null,
   activeTaskId: null,
   activeQuestionVariant: null,
+  selectedQuestion: null,
   pendingCaseCreation: null,
 };
 
@@ -24,5 +25,6 @@ export function clearSensitiveState() {
   state.currentSnapshotId = null;
   state.activeTaskId = null;
   state.activeQuestionVariant = null;
+  state.selectedQuestion = null;
   state.pendingCaseCreation = null;
 }

@@ -205,6 +205,13 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("result?.task?.proposalId", scripts)
         self.assertIn("await onRefresh();\n        showError(", scripts)
 
+    def test_questions_workspace_restores_selected_question_after_refresh(self):
+        root = Path(__file__).resolve().parents[1] / "web"
+        scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
+
+        self.assertIn("const rememberedSelection = getState().selectedQuestion;", scripts)
+        self.assertIn("setState({ selectedQuestion: { caseId, questionId: selectedId } });", scripts)
+
     def test_two_pass_evaluation_progress_preserves_previous_result_provenance(self):
         root = Path(__file__).resolve().parents[1] / "web"
         scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))

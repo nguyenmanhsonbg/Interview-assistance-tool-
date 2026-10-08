@@ -1229,7 +1229,12 @@ function renderQuestionWorkspace(questionSet, caseId, onRefresh, assessmentStart
   detailHost.id = "question-detail-panel";
   detailHost.setAttribute("role", "tabpanel");
   workspace.append(master, detailHost);
-  let selectedId = questions[0]?.id;
+  const rememberedSelection = getState().selectedQuestion;
+  let selectedId = rememberedSelection?.caseId === caseId
+    && questions.some((question) => question.id === rememberedSelection.questionId)
+    ? rememberedSelection.questionId
+    : questions[0]?.id;
+  if (selectedId) setState({ selectedQuestion: { caseId, questionId: selectedId } });
   let restoreFocusId = null;
   const redraw = () => {
     master.replaceChildren();
@@ -1238,6 +1243,7 @@ function renderQuestionWorkspace(questionSet, caseId, onRefresh, assessmentStart
       for (const question of group.items) {
         const item = button("", () => {
           selectedId = question.id;
+          setState({ selectedQuestion: { caseId, questionId: selectedId } });
           restoreFocusId = question.id;
           redraw();
         }, "master-item" + (selectedId === question.id ? " selected" : ""));
