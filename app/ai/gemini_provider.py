@@ -24,6 +24,7 @@ _MODEL_ALIASES = {
 }
 _CANONICAL_MODELS = frozenset(DEFAULT_GEMINI_MODELS)
 _OPERATION_CONFIG = {
+    "EXTRACT_JOB_LEVEL": "job_level_extraction",
     "GENERATE_QUESTIONS": "question_generation",
     "GENERATE_QUESTION_VARIANT": "question_variant_generation",
     "GENERATE_QUESTION_ADDITION": "question_addition_generation",
@@ -33,6 +34,7 @@ _OPERATION_CONFIG = {
     "SUGGEST_FOLLOW_UP": "follow_up_question",
 }
 _OPERATION_TEMPERATURE = {
+    "EXTRACT_JOB_LEVEL": 0.1,
     "GENERATE_QUESTIONS": 0.2,
     "GENERATE_QUESTION_VARIANT": 0.2,
     "GENERATE_QUESTION_ADDITION": 0.2,
@@ -132,6 +134,18 @@ _QUESTION_GENERATION_RESPONSE_SCHEMA = {
         "schemaVersion", "operation", "competencyMatrix", "questions", "gaps",
         "conflicts", "estimatedDurationSeconds", "confidence", "limitations",
     ],
+}
+_JOB_LEVEL_EXTRACTION_RESPONSE_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "schemaVersion": {
+            "type": "STRING", "enum": ["job-level-extraction.v1"]
+        },
+        "targetLevel": {"type": "STRING"},
+        "confidence": {"type": "NUMBER"},
+        "evidence": {"type": "ARRAY", "items": {"type": "STRING"}},
+    },
+    "required": ["schemaVersion", "targetLevel", "confidence", "evidence"],
 }
 _EVIDENCE_RESPONSE_SCHEMA = {
     "type": "OBJECT",
@@ -376,6 +390,7 @@ _QUESTION_ADDITION_RESPONSE_SCHEMA = {
     ],
 }
 _OPERATION_RESPONSE_SCHEMAS = {
+    "EXTRACT_JOB_LEVEL": _JOB_LEVEL_EXTRACTION_RESPONSE_SCHEMA,
     "GENERATE_QUESTIONS": _QUESTION_GENERATION_RESPONSE_SCHEMA,
     "GENERATE_QUESTION_VARIANT": _QUESTION_VARIANT_RESPONSE_SCHEMA,
     "GENERATE_QUESTION_ADDITION": _QUESTION_ADDITION_RESPONSE_SCHEMA,
@@ -434,6 +449,9 @@ class GeminiAIProvider:
 
     def generate_questions(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._call("GENERATE_QUESTIONS", payload)
+
+    def extract_job_level(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._call("EXTRACT_JOB_LEVEL", payload)
 
     def generate_question_variant(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._call("GENERATE_QUESTION_VARIANT", payload)

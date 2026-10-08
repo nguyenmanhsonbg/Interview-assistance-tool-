@@ -13,6 +13,9 @@ RETRY_REPAIR_INSTRUCTION = (
 
 
 _PROMPTS = {
+    "job_level_extraction": (
+        "job_level_extraction_prompt.md", "job-level-extraction.v1"
+    ),
     "question_generation": ("question_generation_prompt.md", "question-generation.v1"),
     "question_variant_generation": (
         "question_variant_generation_prompt.md", "question-variant.v1"

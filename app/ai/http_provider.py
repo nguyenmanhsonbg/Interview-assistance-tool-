@@ -31,6 +31,9 @@ class HttpAIProvider:
     def generate_questions(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._call("GENERATE_QUESTIONS", payload)
 
+    def extract_job_level(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._call("EXTRACT_JOB_LEVEL", payload)
+
     def generate_question_variant(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._call("GENERATE_QUESTION_VARIANT", payload)
 
@@ -51,6 +54,7 @@ class HttpAIProvider:
 
     def _call(self, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
         prompt_key = {
+            "EXTRACT_JOB_LEVEL": "job_level_extraction",
             "GENERATE_QUESTIONS": "question_generation",
             "GENERATE_QUESTION_VARIANT": "question_variant_generation",
             "GENERATE_QUESTION_ADDITION": "question_addition_generation",

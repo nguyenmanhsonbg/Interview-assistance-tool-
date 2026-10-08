@@ -9,6 +9,9 @@ from app.domain.errors import ValidationError
 
 
 _SCHEMA_FILES = {
+    "JOB_LEVEL_EXTRACTION": {
+        "job-level-extraction.v1": "job-level-extraction.v1.schema.json",
+    },
     "QUESTION_GENERATION": {"question-generation.v1": "question_generation.schema.json"},
     "ANSWER_EVIDENCE": {"answer-evidence.v1": "answer_evidence.v1.schema.json"},
     "ANSWER_EVALUATION": {

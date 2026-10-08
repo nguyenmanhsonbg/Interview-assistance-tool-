@@ -252,6 +252,37 @@ class GeminiProviderTests(unittest.TestCase):
         )
         self.assertEqual(["USER_PROMPT", "AUTO_GROUP"], schema["properties"]["mode"]["enum"])
 
+    def test_job_level_extraction_operation_uses_fixed_response_schema(self):
+        captured = []
+
+        def opener(request, timeout):
+            captured.append(json.loads(request.data.decode("utf-8")))
+            return FakeResponse(
+                gemini_response(
+                    '{"schemaVersion":"job-level-extraction.v1",'
+                    '"targetLevel":"Senior","confidence":0.9,'
+                    '"evidence":["Senior Backend Engineer"]}'
+                )
+            )
+
+        provider = self.make_provider(opener, models=("gemini-3.6-flash",))
+        result = provider.extract_job_level({"sanitizedJdText": "JD"})
+
+        body = captured[0]
+        self.assertEqual("job-level-extraction.v1", result["schemaVersion"])
+        self.assertIn("EXTRACT_JOB_LEVEL", body["contents"][0]["parts"][0]["text"])
+        self.assertIn("job-level-extraction.v1", body["contents"][0]["parts"][0]["text"])
+        self.assertEqual(0.1, body["generationConfig"]["temperature"])
+        schema = body["generationConfig"]["responseSchema"]
+        self.assertEqual(
+            ["schemaVersion", "targetLevel", "confidence", "evidence"],
+            schema["required"],
+        )
+        self.assertEqual(
+            ["job-level-extraction.v1"],
+            schema["properties"]["schemaVersion"]["enum"],
+        )
+
     def test_two_pass_response_schemas_declare_nested_required_fields(self):
         captured = []
 
