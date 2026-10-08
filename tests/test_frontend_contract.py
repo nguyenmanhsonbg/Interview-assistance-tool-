@@ -303,6 +303,7 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("question-addition-rubric", styles + scripts)
         self.assertIn("question-addition-actions", styles + scripts)
         self.assertIn("question-addition-detail-modal { width: min(960px", styles)
+        self.assertIn("question-addition-choice .modal { width: min(560px", styles)
         self.assertIn("grid-template-columns: minmax(0, 2fr) minmax(240px, 1fr)", styles)
         self.assertIn('setAttribute("aria-haspopup", "dialog")', scripts)
         self.assertIn("openQuestionAdditionDetails(proposal, questionSet, caseId, onRefresh)", scripts)

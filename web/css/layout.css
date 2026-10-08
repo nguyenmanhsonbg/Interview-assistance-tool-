@@ -51,7 +51,7 @@
 .question-add-card:hover:not(:disabled) { border-color: var(--ui-primary); background: var(--ui-surface); }
 .question-add-card-plus { font-size: 32px; font-weight: 400; line-height: 1; }
 .question-addition-progress { display: grid; gap: 10px; }
-.question-addition-choice .modal { width: min(440px, 100%); }
+.question-addition-choice .modal { width: min(560px, 100%); }
 .question-addition-proposal { border-color: var(--ui-primary); background: var(--ui-primary-soft); }
 .question-addition-summary { gap: 8px; }
 .question-addition-summary-text { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
