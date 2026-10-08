@@ -1179,42 +1179,9 @@ function renderQuestionDetail(question, questionSet, caseId, onRefresh, assessme
     promptButton.disabled = hasPendingVariant;
     sameGroupButton.disabled = hasPendingVariant;
     questionActions.append(promptButton, sameGroupButton);
-    const editTrigger = button("Sửa bằng tay", () => {
-      edit.open = true;
-      edit.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    }, "secondary");
-    questionActions.append(editTrigger);
     detail.append(questionActions);
   } else {
     detail.append(element("div", "Câu hỏi đã khóa; không thể tạo proposal hoặc chỉnh sửa sau khi duyệt/bắt đầu assessment.", "notice warning"));
-  }
-  if (!mutationLocked) {
-    const edit = element("details");
-    const summary = element("summary", "Sửa bằng tay");
-    const form = element("form", undefined, "stack");
-    const text = field("Nội dung câu hỏi", "questionText", { type: "textarea", value: question.questionText, required: true });
-    const purpose = field("Mục đích", "purpose", { type: "textarea", value: question.purpose, required: true });
-    const objective = field("Mục tiêu bước tiếp theo", "nextStepObjective", { type: "textarea", value: question.nextStepObjective, required: true });
-    const evidence = field("Bằng chứng cần tìm", "expectedEvidence", { type: "textarea", value: question.expectedEvidence, required: true });
-    const save = element("button", "Lưu chỉnh sửa", "primary");
-    save.type = "submit";
-    form.append(text.label, purpose.label, objective.label, evidence.label, save);
-    formSubmit(form, async () => {
-      const questions = questionSet.questions.map((item) => item.id === question.id ? {
-        ...item,
-        questionText: text.input.value.trim(),
-        purpose: purpose.input.value.trim(),
-        nextStepObjective: objective.input.value.trim(),
-        expectedEvidence: evidence.input.value.trim(),
-      } : item);
-      await apiFetch("/api/v1/interview-cases/" + encodeURIComponent(caseId) + "/question-set", {
-        method: "PATCH",
-        body: JSON.stringify({ questionSetId: questionSet.id, questions }),
-      });
-      await onRefresh();
-    });
-    edit.append(summary, form);
-    detail.append(edit);
   }
   if (!mutationLocked) loadQuestionVariantState(variantHost, question, questionSet, caseId, onRefresh);
   return detail;

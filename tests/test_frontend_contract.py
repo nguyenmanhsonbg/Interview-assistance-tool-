@@ -179,7 +179,6 @@ class FrontendContractTests(unittest.TestCase):
         for marker in (
             "Gen theo prompt",
             "Tự động gen câu khác",
-            "Sửa bằng tay",
             "GENERATE_QUESTION_VARIANT",
             '"USER_PROMPT"',
             '"SAME_GROUP"',
@@ -204,6 +203,8 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("mutationLocked", scripts)
         self.assertIn("result?.task?.proposalId", scripts)
         self.assertIn("await onRefresh();\n        showError(", scripts)
+        self.assertNotIn("Sửa bằng tay", scripts)
+        self.assertNotIn("Lưu chỉnh sửa", scripts)
 
     def test_questions_workspace_restores_selected_question_after_refresh(self):
         root = Path(__file__).resolve().parents[1] / "web"
