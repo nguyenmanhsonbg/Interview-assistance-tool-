@@ -947,8 +947,8 @@ function openQuestionAdditionChoice(groupKey, handlers = {}) {
   const modal = element("section", undefined, "modal");
   modal.setAttribute("role", "dialog");
   modal.setAttribute("aria-modal", "true");
-  const heading = element("h2", "ThÃªm cÃ¢u há»i · " + categoryLabel(groupKey));
-  const description = element("p", "Chá»n cÃ¡ch táº¡o proposal cho group hiá»‡n táº¡i.", "muted");
+  const heading = element("h2", "Thêm câu hỏi · " + categoryLabel(groupKey));
+  const description = element("p", "Chọn cách tạo proposal cho group hiện tại.", "muted");
   const closeModal = () => {
     document.removeEventListener("keydown", keydownHandler);
     backdrop.remove();
@@ -962,11 +962,11 @@ function openQuestionAdditionChoice(groupKey, handlers = {}) {
     closeModal();
     handlers.onPrompt?.();
   }, "primary");
-  const automatic = button("Tá»± Ä‘á»™ng gen", () => {
+  const automatic = button("Tự động gen", () => {
     closeModal();
     return handlers.onAuto?.();
   }, "secondary");
-  const cancel = button("Há»§y", closeModal, "secondary");
+  const cancel = button("Hủy", closeModal, "secondary");
   const actions = element("div", undefined, "actions");
   actions.append(prompt, automatic, cancel);
   modal.append(heading, description, actions);
@@ -985,19 +985,19 @@ function openQuestionAdditionPrompt(groupKey, handlers = {}) {
   const modal = element("section", undefined, "modal question-prompt-modal");
   modal.setAttribute("role", "dialog");
   modal.setAttribute("aria-modal", "true");
-  const heading = element("h2", "Gen cÃ¢u há»i theo prompt · " + categoryLabel(groupKey));
-  const description = element("p", "Prompt lÃ  yÃªu cáº§u bá»• sung cho AI; group vÃ  quyá»n duyá»‡t váº«n do HÄCM kiá»ƒm soÃ¡t.", "muted");
-  const prompt = field("YÃªu cáº§u bá»• sung", "question-addition-prompt", {
+  const heading = element("h2", "Gen câu hỏi theo prompt · " + categoryLabel(groupKey));
+  const description = element("p", "Prompt là yêu cầu bổ sung cho AI; group và quyền duyệt vẫn do HĐCM kiểm soát.", "muted");
+  const prompt = field("Yêu cầu bổ sung", "question-addition-prompt", {
     type: "textarea",
     required: true,
-    placeholder: "VÃ­ dá»¥: TÃ¬m thÃªm báº±ng chá»©ng vá» cÃ¡ch xá»­ lÃ½ incident...",
+    placeholder: "Ví dụ: Tìm thêm bằng chứng về cách xử lý incident...",
   });
   prompt.input.maxLength = MAX_ADDITION_PROMPT_CHARS;
-  const counter = element("p", "0/" + MAX_ADDITION_PROMPT_CHARS + " kÃ½ tá»±", "muted");
+  const counter = element("p", "0/" + MAX_ADDITION_PROMPT_CHARS + " ký tự", "muted");
   const validation = element("p", "", "notice error");
   validation.hidden = true;
   prompt.input.addEventListener("input", () => {
-    counter.textContent = prompt.input.value.length + "/" + MAX_ADDITION_PROMPT_CHARS + " kÃ½ tá»±";
+    counter.textContent = prompt.input.value.length + "/" + MAX_ADDITION_PROMPT_CHARS + " ký tự";
     validation.hidden = true;
   });
   let keydownHandler;
@@ -1010,7 +1010,7 @@ function openQuestionAdditionPrompt(groupKey, handlers = {}) {
   keydownHandler = (event) => {
     if (event.key === "Escape") closeModal();
   };
-  const close = button("Há»§y", closeModal, "secondary");
+  const close = button("Hủy", closeModal, "secondary");
   const submit = element("button", "Gen theo prompt", "primary");
   submit.type = "submit";
   const form = element("form", undefined, "stack");
@@ -1022,8 +1022,8 @@ function openQuestionAdditionPrompt(groupKey, handlers = {}) {
     const value = prompt.input.value.trim();
     if (!value || value.length > MAX_ADDITION_PROMPT_CHARS) {
       validation.textContent = !value
-        ? "HÃ£y nháº­p prompt trÆ°á»›c khi táº¡o cÃ¢u há»i."
-        : "Prompt khÃ´ng Ä‘Æ°á»£c vÆ°á»£t quÃ¡ " + MAX_ADDITION_PROMPT_CHARS + " kÃ½ tá»±.";
+        ? "Hãy nhập prompt trước khi tạo câu hỏi."
+        : "Prompt không được vượt quá " + MAX_ADDITION_PROMPT_CHARS + " ký tự.";
       validation.hidden = false;
       prompt.input.focus();
       return;

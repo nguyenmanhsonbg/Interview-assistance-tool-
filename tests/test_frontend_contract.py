@@ -248,6 +248,28 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn('questionSet.status === "APPROVED" || assessmentStarted', scripts)
         self.assertNotIn("Sá»­a báº±ng tay", scripts)
 
+    def test_question_addition_popups_use_valid_vietnamese_copy(self):
+        root = Path(__file__).resolve().parents[1] / "web"
+        scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
+        choice_start = scripts.index("function openQuestionAdditionChoice")
+        prompt_start = scripts.index("function openQuestionAdditionPrompt")
+        proposal_start = scripts.index("function renderQuestionAdditionFields")
+        popup_copy = scripts[choice_start:proposal_start]
+
+        self.assertNotIn("Ã", popup_copy)
+        self.assertNotIn("Â", popup_copy)
+        for marker in (
+            "Thêm câu hỏi",
+            "Chọn cách tạo proposal cho group hiện tại.",
+            "Tự động gen",
+            "Hủy",
+            "Gen câu hỏi theo prompt",
+            "Yêu cầu bổ sung",
+            "Hãy nhập prompt trước khi tạo câu hỏi.",
+        ):
+            self.assertIn(marker, popup_copy)
+        self.assertLess(choice_start, prompt_start)
+
     def test_questions_workspace_restores_selected_question_after_refresh(self):
         root = Path(__file__).resolve().parents[1] / "web"
         scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
