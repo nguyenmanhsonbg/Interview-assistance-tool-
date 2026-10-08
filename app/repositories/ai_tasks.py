@@ -33,7 +33,7 @@ class AITaskRepository(RepositoryBase):
                      OR
                      (t.assessment_snapshot_id IS NOT NULL
                       AND ic.refined_flow_status='AI_ANALYZING')
-                     OR t.task_type='GENERATE_QUESTION_VARIANT'
+                     OR t.task_type IN ('GENERATE_QUESTION_VARIANT', 'GENERATE_QUESTION_ADDITION')
                    )
                    ORDER BY t.created_at, t.id"""
             )
@@ -60,18 +60,18 @@ class AITaskRepository(RepositoryBase):
         )
         return None if row is None else _result_dict(row)
 
-    def insert(self, connection: sqlite3.Connection, *, task_id: str, case_id: str, assessment_attempt_id: str | None, assessment_snapshot_id: str | None, task_type: str, idempotency_key: str, input_fingerprint: str, input_manifest: dict[str, Any], provider: str | None, model: str | None, prompt_key: str, prompt_version: str, schema_version: str, max_retry: int, phase: str | None = None, source_question_id: str | None = None) -> None:
+    def insert(self, connection: sqlite3.Connection, *, task_id: str, case_id: str, assessment_attempt_id: str | None, assessment_snapshot_id: str | None, task_type: str, idempotency_key: str, input_fingerprint: str, input_manifest: dict[str, Any], provider: str | None, model: str | None, prompt_key: str, prompt_version: str, schema_version: str, max_retry: int, phase: str | None = None, source_question_id: str | None = None, target_question_category: str | None = None) -> None:
         connection.execute(
             """INSERT INTO ai_tasks(
                 id, interview_case_id, assessment_attempt_id, assessment_snapshot_id, task_type,
                 idempotency_key, input_fingerprint, input_manifest_json,
                 provider, model, prompt_key, prompt_version, schema_version, max_retry,
-                phase, source_question_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                phase, source_question_id, target_question_category
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (task_id, case_id, assessment_attempt_id, assessment_snapshot_id, task_type, idempotency_key,
              input_fingerprint, json.dumps(input_manifest, ensure_ascii=False, separators=(",", ":")),
              provider, model, prompt_key, prompt_version, schema_version, max_retry, phase,
-             source_question_id),
+             source_question_id, target_question_category),
         )
 
     def set_phase(self, connection: sqlite3.Connection, task_id: str, phase: str) -> None:
@@ -104,12 +104,26 @@ class AITaskRepository(RepositoryBase):
         manifest = task.get("inputManifest", {})
         question_set_id = manifest.get("questionSetId")
         source_question_id = task.get("sourceQuestionId") or manifest.get("sourceQuestionId")
+        target_question_category = (
+            task.get("targetQuestionCategory") or manifest.get("targetCategory")
+        )
         if result_type == "QUESTION_VARIANT":
             previous = connection.execute(
                 """SELECT id, version_no FROM ai_results
                    WHERE interview_case_id=? AND result_type=?
                      AND question_set_id=? AND source_question_id=? AND is_current=1""",
                 (task["interviewCaseId"], result_type, question_set_id, source_question_id),
+            ).fetchone()
+        elif result_type == "QUESTION_ADDITION":
+            previous = connection.execute(
+                """SELECT id, version_no FROM ai_results
+                   WHERE interview_case_id=? AND result_type=?
+                     AND question_set_id=? AND target_question_category=?
+                     AND is_current=1""",
+                (
+                    task["interviewCaseId"], result_type, question_set_id,
+                    target_question_category,
+                ),
             ).fetchone()
         else:
             previous = connection.execute(
@@ -125,12 +139,14 @@ class AITaskRepository(RepositoryBase):
             """INSERT INTO ai_results(
                 id, ai_task_id, interview_case_id, assessment_attempt_id, assessment_snapshot_id,
                 question_set_id, source_question_id, result_type, version_no,
-                supersedes_result_id, payload_json, confidence, is_current
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+                supersedes_result_id, payload_json, confidence, is_current,
+                target_question_category
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
             (result_id, task["id"], task["interviewCaseId"], task["assessmentAttemptId"], task["assessmentSnapshotId"],
              question_set_id, source_question_id, result_type, version,
              None if previous is None else previous["id"],
-             json.dumps(payload, ensure_ascii=False, separators=(",", ":")), payload.get("confidence")),
+             json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+             payload.get("confidence"), target_question_category),
         )
         connection.execute(
             """UPDATE ai_tasks SET status='COMPLETED', error_code=NULL,
@@ -145,6 +161,7 @@ def _task_dict(row: sqlite3.Row) -> dict[str, Any]:
         "id": row["id"], "interviewCaseId": row["interview_case_id"],
         "assessmentAttemptId": row["assessment_attempt_id"], "assessmentSnapshotId": row["assessment_snapshot_id"], "taskType": row["task_type"],
         "sourceQuestionId": row["source_question_id"],
+        "targetQuestionCategory": row["target_question_category"],
         "status": row["status"], "phase": row["phase"], "idempotencyKey": row["idempotency_key"],
         "inputFingerprint": row["input_fingerprint"], "inputManifest": json.loads(row["input_manifest_json"]),
         "provider": row["provider"], "model": row["model"], "promptKey": row["prompt_key"],
@@ -159,6 +176,7 @@ def _result_dict(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": row["id"], "aiTaskId": row["ai_task_id"], "resultType": row["result_type"],
         "questionSetId": row["question_set_id"], "sourceQuestionId": row["source_question_id"],
+        "targetQuestionCategory": row["target_question_category"],
         "assessmentSnapshotId": row["assessment_snapshot_id"],
         "versionNo": row["version_no"], "payload": json.loads(row["payload_json"]),
         "confidence": row["confidence"], "isCurrent": bool(row["is_current"]), "createdAt": row["created_at"],

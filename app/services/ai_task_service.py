@@ -16,6 +16,7 @@ from app.repositories.audit import append_audit
 _TASK_CONFIG = {
     "GENERATE_QUESTIONS": ("QUESTION_GENERATION", "question_generation", "question-generation.v1"),
     "GENERATE_QUESTION_VARIANT": ("QUESTION_VARIANT", "question_variant_generation", "question-variant.v1"),
+    "GENERATE_QUESTION_ADDITION": ("QUESTION_ADDITION", "question_addition_generation", "question-addition.v1"),
     "EVALUATE_ASSESSMENT": ("ANSWER_EVALUATION", "answer_evaluation_v2", "answer-evaluation.v2"),
     "GENERATE_BRIEF": ("INTERVIEW_BRIEF", "answer_evaluation", "answer-evaluation.v1"),
     "SUGGEST_FOLLOW_UP": ("FOLLOW_UP", "follow_up_question", "follow-up.v1"),
@@ -29,7 +30,7 @@ class AITaskService:
         self.schemas = schemas
         self.repository = AITaskRepository(database)
 
-    def enqueue(self, case_id: str, task_type: str, *, input_manifest: dict[str, Any], input_fingerprint: str, idempotency_key: str, assessment_attempt_id: str | None = None, assessment_snapshot_id: str | None = None, source_question_id: str | None = None, provider: str | None = None, model: str | None = None, max_retry: int = 1, prompt_key: str | None = None, schema_version: str | None = None) -> dict[str, Any]:
+    def enqueue(self, case_id: str, task_type: str, *, input_manifest: dict[str, Any], input_fingerprint: str, idempotency_key: str, assessment_attempt_id: str | None = None, assessment_snapshot_id: str | None = None, source_question_id: str | None = None, target_question_category: str | None = None, provider: str | None = None, model: str | None = None, max_retry: int = 1, prompt_key: str | None = None, schema_version: str | None = None) -> dict[str, Any]:
         if task_type not in _TASK_CONFIG:
             raise ValidationError("Unsupported AI task type")
         if not re.fullmatch(r"[0-9a-fA-F]{64}", input_fingerprint):
@@ -62,7 +63,8 @@ class AITaskService:
                 prompt_key=prompt_key, prompt_version=schema_version,
                 schema_version=schema_version, max_retry=max_retry,
                 phase="EVIDENCE_ANALYSIS" if task_type == "EVALUATE_ASSESSMENT" and assessment_snapshot_id else None,
-                source_question_id=source_question_id)
+                source_question_id=source_question_id,
+                target_question_category=target_question_category)
             append_audit(connection, actor_type="SYSTEM", action="AI_TASK_CREATED",
                 entity_type="AI_TASK", entity_id=task_id,
                 metadata={"taskType": task_type, "resultType": result_type})
@@ -105,6 +107,9 @@ class AITaskService:
             elif task["taskType"] == "GENERATE_QUESTION_VARIANT":
                 output = provider.generate_question_variant(payload)
                 operation = result_type = "QUESTION_VARIANT"
+            elif task["taskType"] == "GENERATE_QUESTION_ADDITION":
+                output = provider.generate_question_addition(payload)
+                operation = result_type = "QUESTION_ADDITION"
             elif task["taskType"] in {"EVALUATE_ASSESSMENT", "GENERATE_BRIEF"}:
                 output = provider.evaluate_answers(payload)
                 operation = "ANSWER_EVALUATION"

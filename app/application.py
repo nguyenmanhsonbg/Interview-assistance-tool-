@@ -21,6 +21,7 @@ from app.services.evaluation_service import EvaluationService
 from app.services.interview_brief_service import InterviewBriefService
 from app.services.interview_service import InterviewService
 from app.services.question_generation_service import QuestionGenerationService
+from app.services.question_addition_service import QuestionAdditionService
 from app.services.question_variant_service import QuestionVariantService
 
 
@@ -40,6 +41,9 @@ class _TaskProcessor:
         self.question_variants = QuestionVariantService(
             database, schema_root, provider_name=provider_name, model_name=model_name
         )
+        self.question_additions = QuestionAdditionService(
+            database, schema_root, provider_name=provider_name, model_name=model_name
+        )
         self.evaluations = EvaluationService(
             database, schema_root, provider_name=provider_name, model_name=model_name
         )
@@ -55,6 +59,8 @@ class _TaskProcessor:
                 return self.questions.process(task_id, provider)
             if task["taskType"] == "GENERATE_QUESTION_VARIANT":
                 return self.question_variants.process(task_id, provider)
+            if task["taskType"] == "GENERATE_QUESTION_ADDITION":
+                return self.question_additions.process(task_id, provider)
             if task["taskType"] in {"EVALUATE_ASSESSMENT", "GENERATE_BRIEF"}:
                 result = self.evaluations.process(task_id, provider)
                 if (
