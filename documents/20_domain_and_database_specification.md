@@ -349,7 +349,9 @@ UNIQUE(assessment_attempt_id, question_id). Service phải xác minh question th
 | id | TEXT | N | — | PK | AI task UUID |
 | interview_case_id | TEXT | N | — | FK interview_cases(id), ON DELETE CASCADE | Case |
 | assessment_attempt_id | TEXT | Y | NULL | FK assessment_attempts(id), ON DELETE CASCADE | Attempt nếu là evaluation |
-| task_type | TEXT | N | — | CHECK GENERATE_QUESTIONS/EVALUATE_ASSESSMENT/GENERATE_BRIEF/SUGGEST_FOLLOW_UP | Capability |
+| assessment_snapshot_id | TEXT | Y | NULL | FK assessment_snapshots(id), ON DELETE CASCADE | Snapshot nếu là evaluation |
+| source_question_id | TEXT | Y | NULL | Logical source question reference | Câu hỏi nguồn khi sinh variant |
+| task_type | TEXT | N | — | CHECK GENERATE_QUESTIONS/GENERATE_QUESTION_VARIANT/EVALUATE_ASSESSMENT/GENERATE_BRIEF/SUGGEST_FOLLOW_UP | Capability |
 | status | TEXT | N | PENDING | CHECK PENDING/RUNNING/COMPLETED/FAILED/PENDING_RETRY | Queue state |
 | idempotency_key | TEXT | N | — | UNIQUE | Chống duplicate operation |
 | input_fingerprint | TEXT | N | — | CHECK 64 hex | Fingerprint input snapshot |
@@ -379,7 +381,9 @@ Task RUNNING khi restart phải được recovery thành FAILED hoặc PENDING_R
 | interview_case_id | TEXT | N | — | FK interview_cases(id), ON DELETE CASCADE | Case |
 | assessment_attempt_id | TEXT | Y | NULL | FK assessment_attempts(id), ON DELETE CASCADE | Attempt nếu có |
 | question_set_id | TEXT | Y | NULL | FK question_sets(id), ON DELETE RESTRICT | Question Set nếu có |
-| result_type | TEXT | N | — | CHECK QUESTION_GENERATION/ANSWER_EVALUATION/INTERVIEW_BRIEF/FOLLOW_UP | Loại output |
+| source_question_id | TEXT | Y | NULL | Logical source question reference | Câu hỏi nguồn khi là variant |
+| assessment_snapshot_id | TEXT | Y | NULL | FK assessment_snapshots(id), ON DELETE CASCADE | Snapshot nếu có |
+| result_type | TEXT | N | — | CHECK QUESTION_GENERATION/QUESTION_VARIANT/ANSWER_EVALUATION/INTERVIEW_BRIEF/FOLLOW_UP | Loại output |
 | version_no | INTEGER | N | 1 | CHECK > 0; UNIQUE(case, type, version) | Version result |
 | supersedes_result_id | TEXT | Y | NULL | FK ai_results(id), ON DELETE SET NULL | Result cũ |
 | payload_json | TEXT | N | — | JSON object đã validate | Output đầy đủ |
@@ -389,7 +393,26 @@ Task RUNNING khi restart phải được recovery thành FAILED hoặc PENDING_R
 
 Result cũ không bị overwrite. Rerun tạo task/result/version mới; application chuyển is_current trong một transaction.
 
-### 6.13. interview_briefs
+### 6.13. question_variant_proposals
+
+| Field | SQLite type | Null | Default | Key / constraint | Mục đích |
+| --- | --- | --- | --- | --- | --- |
+| id | TEXT | N | — | PK | Proposal UUID |
+| ai_result_id | TEXT | N | — | FK ai_results(id), ON DELETE RESTRICT; UNIQUE | Result variant đã validate |
+| interview_case_id | TEXT | N | — | FK interview_cases(id), ON DELETE CASCADE | Case |
+| question_set_id | TEXT | N | — | FK question_sets(id), ON DELETE CASCADE | Question Set nguồn |
+| source_question_id | TEXT | N | — | Logical source question reference | Slot cần preview/apply |
+| mode | TEXT | N | — | CHECK USER_PROMPT/SAME_GROUP | Cách sinh variant |
+| source_fingerprint | TEXT | N | — | CHECK 64 hex | Snapshot chống stale apply |
+| status | TEXT | N | PROPOSED | CHECK PROPOSED/APPLIED/DISCARDED | Proposal lifecycle |
+| created_at | TEXT | N | UTC now | — | Thời điểm tạo |
+| updated_at | TEXT | N | UTC now | — | Cập nhật gần nhất |
+| applied_at | TEXT | Y | NULL | — | Thời điểm apply |
+| discarded_at | TEXT | Y | NULL | — | Thời điểm discard |
+
+Proposal chỉ là candidate để HĐCM review; không tự thay đổi Question Set. `APPLIED` giữ nguyên question ID/slot và chỉ thay thế các content/rubric fields được validate. Source question reference được giữ dạng logical để proposal stale vẫn tồn tại sau khi draft được rebuild.
+
+### 6.14. interview_briefs
 
 | Field | SQLite type | Null | Default | Key / constraint | Mục đích |
 | --- | --- | --- | --- | --- | --- |

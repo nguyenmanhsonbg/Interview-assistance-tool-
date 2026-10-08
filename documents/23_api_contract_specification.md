@@ -136,6 +136,9 @@ Candidate không được đọc JD, CV, rubric, expected evidence, AI result, I
 | POST/GET | /api/v1/interview-cases/{caseId}/documents | Committee | Upload/list documents |
 | POST | /api/v1/interview-cases/{caseId}/documents/{documentId}/confirm | Committee | Confirm text |
 | POST/GET/PATCH | /api/v1/interview-cases/{caseId}/question-set | Committee | Generate/read/edit set |
+| POST/GET | /api/v1/interview-cases/{caseId}/question-set/questions/{questionId}/variants | Committee | Generate/read question variant proposal |
+| POST | /api/v1/interview-cases/{caseId}/question-set/questions/{questionId}/variants/{variantId}/discard | Committee | Discard proposal |
+| POST | /api/v1/interview-cases/{caseId}/question-set/questions/{questionId}/variants/{variantId}/apply | Committee | Apply proposal to draft slot |
 | POST | /api/v1/interview-cases/{caseId}/question-set/approve | Committee | Approve set |
 | POST/GET | /api/v1/interview-cases/{caseId}/assessment | Committee | Create/read attempt |
 | POST | /api/v1/interview-cases/{caseId}/assessment/start | Committee | Start Candidate Mode |
@@ -395,6 +398,29 @@ Request:
 - Response 200: questionSet và questions.
 - Chỉ DRAFT/GENERATED, tối đa 8 câu.
 - Audit: QUESTION_SET_EDITED.
+
+POST `/api/v1/interview-cases/{caseId}/question-set/questions/{questionId}/variants`
+
+Request: `{ "questionSetId": "uuid", "mode": "USER_PROMPT|SAME_GROUP", "prompt": "string?" }`.
+
+- `USER_PROMPT` yêu cầu prompt sau trim và tối đa 2.000 ký tự; `SAME_GROUP` không nhận prompt.
+- Response 202: `taskId`, `questionSetId`, `questionId`, source snapshot metadata. Retry cùng idempotency key trả task hiện có.
+- Audit: `QUESTION_VARIANT_TASK_REQUESTED`.
+
+GET `/api/v1/interview-cases/{caseId}/question-set/questions/{questionId}/variants/{variantId}`
+
+- Response 200 chỉ trả proposal đã validate, provenance an toàn, `status=PROPOSED|APPLIED|DISCARDED`, variant content, confidence và limitations.
+
+POST `/api/v1/interview-cases/{caseId}/question-set/questions/{questionId}/variants/{variantId}/apply`
+
+Request: `{ "expectedQuestionSetUpdatedAt": "timestamp", "expectedSourceFingerprint": "sha256" }`.
+
+- Chỉ DRAFT/GENERATED và chưa bắt đầu assessment; backend kiểm tra source fingerprint, revalidate toàn bộ set và giữ protected slot fields.
+- Response 200: updated questionSet/question và proposal `APPLIED`; audit `QUESTION_VARIANT_APPLIED`.
+
+POST `/api/v1/interview-cases/{caseId}/question-set/questions/{questionId}/variants/{variantId}/discard`
+
+- Chỉ chuyển proposal `PROPOSED` thành `DISCARDED`; không thay đổi Question Set; audit `QUESTION_VARIANT_DISCARDED`.
 
 POST /api/v1/interview-cases/{caseId}/question-set/approve
 

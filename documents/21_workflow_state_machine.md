@@ -193,11 +193,14 @@ Case không cho phép transition ngược tùy ý. Mọi transition không có t
 | WF-AI-007 | RUNNING | PENDING_RETRY/FAILED | SYSTEM | Startup recovery thấy task RUNNING từ process trước | Không giả định request tiếp tục |
 | WF-AI-008 | COMPLETED | — | Application | Force rerun | Tạo task mới, key mới, result version mới; không đổi task cũ |
 
+Question variant không đổi InterviewCase state. Trong Question Set DRAFT/GENERATED, application tạo `GENERATE_QUESTION_VARIANT` PENDING; worker materialize `QUESTION_VARIANT` thành proposal `PROPOSED`; chỉ thao tác apply của Committee mới thay đổi slot câu hỏi. APPROVED hoặc assessment-started thì request/apply/discard đều bị từ chối.
+
 ## 6. Idempotency và concurrency
 
 ### 6.1. Idempotency key
 
 - Generate questions: key gồm case_id, current document content hashes, question policy version và operation nonce.
+- Generate question variant: key gồm case_id, question_set_id, source_question_id, source fingerprint, mode, prompt/schema version và operation nonce; retry cùng key trả cùng task.
 - Submit attempt: client gửi key; server lưu kết quả submit đầu tiên. Retry cùng key trả cùng trạng thái.
 - Save answer: key gồm attempt_id, question_id và client revision; revision cũ hơn không được ghi đè revision mới.
 - AI evaluation: key gồm attempt_id, question_set_id, answer snapshot fingerprint và prompt/schema version.
@@ -243,6 +246,7 @@ Committee/HR được thực hiện các transition theo actor matrix, nhưng Ca
 | Case create/update/cancel | CASE_CREATED, CASE_UPDATED, CASE_CANCELLED |
 | Document confirm/version | DOCUMENT_TEXT_CONFIRMED, DOCUMENT_VERSION_CREATED |
 | Question generation/approval | QUESTION_SET_GENERATION_REQUESTED, QUESTION_SET_GENERATED, QUESTION_SET_APPROVED |
+| Question variant | QUESTION_VARIANT_TASK_REQUESTED, QUESTION_VARIANT_GENERATED, QUESTION_VARIANT_FAILED, QUESTION_VARIANT_DISCARDED, QUESTION_VARIANT_APPLIED, QUESTION_MANUALLY_EDITED |
 | Attempt start/resume | ASSESSMENT_STARTED, ASSESSMENT_RESUMED |
 | Answer save/submit | ANSWER_AUTOSAVED, ASSESSMENT_SUBMITTED, ASSESSMENT_AUTO_SUBMITTED |
 | AI queue/retry/fail | AI_TASK_CREATED, AI_TASK_RETRIED, AI_TASK_FAILED, AI_RESULT_RERUN |

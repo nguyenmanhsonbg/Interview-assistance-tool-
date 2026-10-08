@@ -23,16 +23,10 @@ class MigrationRunner:
             if version in applied:
                 continue
             try:
-                with self.database.transaction() as connection:
-                    for statement in _split_sql(path.read_text(encoding="utf-8")):
-                        connection.execute(statement)
-                    recorded = connection.execute(
-                        "SELECT 1 FROM schema_migrations WHERE version = ?", (version,)
-                    ).fetchone()
-                    if recorded is None:
-                        connection.execute(
-                            "INSERT INTO schema_migrations(version) VALUES (?)", (version,)
-                        )
+                if _requires_foreign_keys_off(path):
+                    self._apply_with_foreign_keys_off(version, path)
+                else:
+                    self._apply_in_transaction(version, path)
             except (OSError, sqlite3.Error) as error:
                 raise MigrationError(
                     f"Migration {version:03d} failed; startup cannot continue"
@@ -40,6 +34,43 @@ class MigrationRunner:
             completed.append(version)
             applied.add(version)
         return completed
+
+    def _apply_in_transaction(self, version: int, path: Path) -> None:
+        with self.database.transaction() as connection:
+            self._execute_migration(connection, version, path)
+
+    def _apply_with_foreign_keys_off(self, version: int, path: Path) -> None:
+        with self.database.connection() as connection:
+            connection.execute("PRAGMA foreign_keys = OFF")
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                self._execute_migration(connection, version, path)
+                violation = connection.execute(
+                    "PRAGMA foreign_key_check"
+                ).fetchone()
+                if violation is not None:
+                    raise sqlite3.IntegrityError(
+                        "foreign key check failed during migration "
+                        f"{version:03d}: {tuple(violation)}"
+                    )
+            except BaseException:
+                connection.rollback()
+                raise
+            else:
+                connection.commit()
+
+    def _execute_migration(
+        self, connection: sqlite3.Connection, version: int, path: Path
+    ) -> None:
+        for statement in _split_sql(path.read_text(encoding="utf-8")):
+            connection.execute(statement)
+        recorded = connection.execute(
+            "SELECT 1 FROM schema_migrations WHERE version = ?", (version,)
+        ).fetchone()
+        if recorded is None:
+            connection.execute(
+                "INSERT INTO schema_migrations(version) VALUES (?)", (version,)
+            )
 
     def _applied_versions(self) -> set[int]:
         if not self.database.path.exists():
@@ -79,3 +110,7 @@ def _split_sql(script: str) -> list[str]:
     if buffer.strip():
         raise MigrationError("Incomplete SQL statement")
     return statements
+
+
+def _requires_foreign_keys_off(path: Path) -> bool:
+    return "-- @requires_foreign_keys_off" in path.read_text(encoding="utf-8")
