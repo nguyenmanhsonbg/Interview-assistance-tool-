@@ -7,10 +7,22 @@ from tests.support import MigratedDatabaseFixture
 
 
 class FakeProvider:
-    def __init__(self, result=None, error=None):
+    def __init__(self, result=None, error=None, level_result=None):
         self.result = result or question_generation_payload()
+        self.level_result = level_result or {
+            "schemaVersion": "job-level-extraction.v1",
+            "targetLevel": "Senior",
+            "confidence": 0.92,
+            "evidence": ["Senior Engineer"],
+        }
         self.error = error
         self.calls = 0
+
+    def extract_job_level(self, payload):
+        self.calls += 1
+        if self.error:
+            raise self.error
+        return self.level_result
 
     def generate_questions(self, payload):
         self.calls += 1
@@ -106,6 +118,68 @@ class AITaskTests(MigratedDatabaseFixture, unittest.TestCase):
             ).fetchone()
         self.assertEqual("gemini", row["provider"])
         self.assertEqual("gemini-3.6-flash", row["model"])
+
+    def test_job_level_task_uses_fixed_operation_and_completes(self):
+        from app.ai.schemas import SchemaRegistry
+        from app.services.ai_task_service import AITaskService
+        from pathlib import Path
+
+        with self.database.transaction() as connection:
+            connection.execute(
+                "UPDATE jobs SET target_level=NULL, target_level_status='PENDING', target_level_source=NULL WHERE id=?",
+                (self.case["jobId"],),
+            )
+        service = AITaskService(
+            self.database,
+            SchemaRegistry(Path(__file__).resolve().parents[1] / "schemas"),
+        )
+        task = service.enqueue(
+            self.case["id"], "EXTRACT_JOB_LEVEL",
+            input_manifest={"jobId": self.case["jobId"], "document": {"id": "jd"}},
+            input_fingerprint=hashlib.sha256(b"level-input").hexdigest(),
+            idempotency_key="level-task-key",
+        )
+        completed = service.process(task["id"], FakeProvider())
+
+        self.assertEqual("COMPLETED", completed["status"])
+        self.assertEqual("JOB_LEVEL_EXTRACTION", completed["result"]["resultType"])
+        with self.database.connection() as connection:
+            status = connection.execute(
+                "SELECT target_level_status FROM jobs WHERE id=?", (self.case["jobId"],)
+            ).fetchone()[0]
+        self.assertEqual("EXTRACTING", status)
+
+    def test_job_level_task_restart_recovery_keeps_extraction_pending(self):
+        from app.services.ai_task_service import AITaskService
+        from app.ai.schemas import SchemaRegistry
+        from pathlib import Path
+
+        with self.database.transaction() as connection:
+            connection.execute(
+                "UPDATE jobs SET target_level=NULL, target_level_status='PENDING', target_level_source=NULL WHERE id=?",
+                (self.case["jobId"],),
+            )
+        service = AITaskService(
+            self.database,
+            SchemaRegistry(Path(__file__).resolve().parents[1] / "schemas"),
+        )
+        task = service.enqueue(
+            self.case["id"], "EXTRACT_JOB_LEVEL",
+            input_manifest={"jobId": self.case["jobId"]},
+            input_fingerprint=hashlib.sha256(b"recovery-input").hexdigest(),
+            idempotency_key="level-recovery-key",
+        )
+        with self.database.transaction() as connection:
+            connection.execute("UPDATE ai_tasks SET status='RUNNING' WHERE id=?", (task["id"],))
+
+        recovered = service.recover_interrupted()
+
+        self.assertEqual([task["id"]], recovered["pendingRetry"])
+        with self.database.connection() as connection:
+            status = connection.execute(
+                "SELECT target_level_status FROM jobs WHERE id=?", (self.case["jobId"],)
+            ).fetchone()[0]
+        self.assertEqual("EXTRACTING", status)
 
     def test_retry_once_then_fail_and_restart_recovery(self):
         from app.ai.provider import ProviderError

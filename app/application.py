@@ -20,6 +20,7 @@ from app.services.assessment_service import AssessmentService
 from app.services.evaluation_service import EvaluationService
 from app.services.interview_brief_service import InterviewBriefService
 from app.services.interview_service import InterviewService
+from app.services.job_level_service import JobLevelService
 from app.services.question_generation_service import QuestionGenerationService
 from app.services.question_addition_service import QuestionAdditionService
 from app.services.question_variant_service import QuestionVariantService
@@ -36,6 +37,9 @@ class _TaskProcessor:
     ) -> None:
         self.tasks = AITaskService(database, SchemaRegistry(schema_root))
         self.questions = QuestionGenerationService(
+            database, schema_root, provider_name=provider_name, model_name=model_name
+        )
+        self.job_levels = JobLevelService(
             database, schema_root, provider_name=provider_name, model_name=model_name
         )
         self.question_variants = QuestionVariantService(
@@ -57,6 +61,8 @@ class _TaskProcessor:
         try:
             if task["taskType"] == "GENERATE_QUESTIONS":
                 return self.questions.process(task_id, provider)
+            if task["taskType"] == "EXTRACT_JOB_LEVEL":
+                return self.job_levels.process(task_id, provider)
             if task["taskType"] == "GENERATE_QUESTION_VARIANT":
                 return self.question_variants.process(task_id, provider)
             if task["taskType"] == "GENERATE_QUESTION_ADDITION":
@@ -84,6 +90,9 @@ class _UnavailableProvider:
         )
 
     def generate_questions(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._raise()
+
+    def extract_job_level(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._raise()
 
     def generate_question_variant(self, payload: dict[str, Any]) -> dict[str, Any]:

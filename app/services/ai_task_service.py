@@ -14,6 +14,7 @@ from app.repositories.audit import append_audit
 
 
 _TASK_CONFIG = {
+    "EXTRACT_JOB_LEVEL": ("JOB_LEVEL_EXTRACTION", "job_level_extraction", "job-level-extraction.v1"),
     "GENERATE_QUESTIONS": ("QUESTION_GENERATION", "question_generation", "question-generation.v1"),
     "GENERATE_QUESTION_VARIANT": ("QUESTION_VARIANT", "question_variant_generation", "question-variant.v1"),
     "GENERATE_QUESTION_ADDITION": ("QUESTION_ADDITION", "question_addition_generation", "question-addition.v1"),
@@ -48,9 +49,27 @@ class AITaskService:
         schema_version = schema_version or configured_schema_version
         task_id = str(uuid.uuid4())
         with self.database.transaction() as connection:
-            case = connection.execute("SELECT status FROM interview_cases WHERE id=?", (case_id,)).fetchone()
+            case = connection.execute(
+                "SELECT status, job_id FROM interview_cases WHERE id=?", (case_id,)
+            ).fetchone()
             if case is None:
                 raise ResourceNotFound("Interview case not found")
+            if task_type == "EXTRACT_JOB_LEVEL":
+                job_id = input_manifest.get("jobId")
+                if not isinstance(job_id, str) or job_id != case["job_id"]:
+                    raise StateConflict("Job level extraction does not match the case Job")
+                job = connection.execute(
+                    "SELECT target_level_status FROM jobs WHERE id=?", (job_id,)
+                ).fetchone()
+                if job is None:
+                    raise ResourceNotFound("Job not found")
+                if job["target_level_status"] not in {"PENDING", "FAILED"}:
+                    raise StateConflict("Job level extraction is already in progress or ready")
+                connection.execute(
+                    """UPDATE jobs SET target_level_status='EXTRACTING',
+                       updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
+                    (job_id,),
+                )
             if task_type == "GENERATE_QUESTIONS":
                 if case["status"] not in {"DOCUMENTS_READY", "QUESTION_GENERATION_FAILED"}:
                     raise StateConflict("Case is not ready for question generation")
@@ -101,6 +120,9 @@ class AITaskService:
             if runner is not None:
                 output = runner(task, provider, payload)
                 operation = result_type = "ANSWER_EVALUATION"
+            elif task["taskType"] == "EXTRACT_JOB_LEVEL":
+                output = provider.extract_job_level(payload)
+                operation = result_type = "JOB_LEVEL_EXTRACTION"
             elif task["taskType"] == "GENERATE_QUESTIONS":
                 output = provider.generate_questions(payload)
                 operation = result_type = "QUESTION_GENERATION"
@@ -230,7 +252,15 @@ class AITaskService:
     def _apply_terminal_failure(connection, task: Any) -> None:
         task_type = task["task_type"]
         case_id = task["interview_case_id"]
-        if task_type == "GENERATE_QUESTIONS":
+        if task_type == "EXTRACT_JOB_LEVEL":
+            connection.execute(
+                """UPDATE jobs SET target_level_status='FAILED',
+                   updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                   WHERE id=(SELECT job_id FROM interview_cases WHERE id=?)
+                     AND target_level_status='EXTRACTING'""",
+                (case_id,),
+            )
+        elif task_type == "GENERATE_QUESTIONS":
             connection.execute(
                 """UPDATE interview_cases SET status='QUESTION_GENERATION_FAILED',
                    updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",

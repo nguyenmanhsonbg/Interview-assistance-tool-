@@ -21,6 +21,7 @@ from app.services.evaluation_service import EvaluationService
 from app.services.html_candidate_package_service import HtmlCandidatePackageService
 from app.services.interview_brief_service import InterviewBriefService
 from app.services.interview_service import InterviewService
+from app.services.job_level_service import JobLevelService
 from app.services.question_generation_service import QuestionGenerationService
 from app.services.question_addition_service import QuestionAdditionService
 from app.services.question_service import QuestionService
@@ -67,6 +68,12 @@ class APIController:
             model_name=ai_model_name,
         )
         self.question_generation = QuestionGenerationService(
+            database,
+            schema_root,
+            provider_name=ai_provider_name,
+            model_name=ai_model_name,
+        )
+        self.job_levels = JobLevelService(
             database,
             schema_root,
             provider_name=ai_provider_name,
@@ -217,7 +224,21 @@ class APIController:
         if body.get("confirmed") is not True:
             raise ValidationError("confirmed must be true")
         document = self.documents.confirm(request.path_params["document_id"], body.get("textSha256", ""))
-        return _ok(request, {"document": document})
+        level_task = None
+        if document["documentType"] == "JD":
+            level_task = self.job_levels.request_for_confirmed_jd(
+                request.path_params["case_id"]
+            )
+            if level_task is not None and level_task["status"] in {
+                "PENDING", "PENDING_RETRY"
+            }:
+                self.submit_task(level_task["id"])
+        data = {"document": document}
+        if level_task is not None:
+            data["levelTask"] = {
+                "id": level_task["id"], "status": level_task["status"]
+            }
+        return _ok(request, data)
 
     def get_question_set(self, request: Request) -> Response:
         question_set = self.questions.get_for_case(request.path_params["case_id"])

@@ -25,6 +25,7 @@ class AITaskRepository(RepositoryBase):
             for row in self.query_all(
                 """SELECT t.id FROM ai_tasks t
                    JOIN interview_cases ic ON ic.id=t.interview_case_id
+                   JOIN jobs j ON j.id=ic.job_id
                    WHERE t.status='COMPLETED' AND t.error_code IS NULL AND (
                      (t.task_type='GENERATE_QUESTIONS' AND ic.status='QUESTIONS_GENERATING')
                      OR
@@ -33,11 +34,25 @@ class AITaskRepository(RepositoryBase):
                      OR
                      (t.assessment_snapshot_id IS NOT NULL
                       AND ic.refined_flow_status='AI_ANALYZING')
+                     OR
+                     (t.task_type='EXTRACT_JOB_LEVEL'
+                      AND j.target_level_status='EXTRACTING')
                      OR t.task_type IN ('GENERATE_QUESTION_VARIANT', 'GENERATE_QUESTION_ADDITION')
                    )
                    ORDER BY t.created_at, t.id"""
             )
         ]
+
+    def find_by_case_task_fingerprint(
+        self, case_id: str, task_type: str, input_fingerprint: str
+    ) -> dict[str, Any] | None:
+        row = self.query_one(
+            """SELECT id FROM ai_tasks
+               WHERE interview_case_id=? AND task_type=? AND input_fingerprint=?
+               ORDER BY created_at DESC, id DESC LIMIT 1""",
+            (case_id, task_type, input_fingerprint),
+        )
+        return None if row is None else self.get(row["id"])
     def get(self, task_id: str) -> dict[str, Any]:
         row = self.query_one("SELECT * FROM ai_tasks WHERE id=?", (task_id,))
         if row is None:
