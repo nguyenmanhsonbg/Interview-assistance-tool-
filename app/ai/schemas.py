@@ -15,6 +15,9 @@ _SCHEMA_FILES = {
         "answer-evaluation.v1": "answer_evaluation.schema.json",
         "answer-evaluation.v2": "answer_evaluation.v2.schema.json",
     },
+    "QUESTION_VARIANT": {
+        "question-variant.v1": "question-variant.v1.schema.json",
+    },
     "FOLLOW_UP": {"follow-up.v1": "follow_up_question.schema.json"},
 }
 
@@ -55,6 +58,8 @@ class SchemaRegistry:
             _validate_evidence_rules(payload, context or {})
         elif operation == "ANSWER_EVALUATION":
             _validate_evaluation_rules(payload, context or {})
+        elif operation == "QUESTION_VARIANT":
+            _validate_question_variant_rules(payload, context or {})
         elif operation == "FOLLOW_UP":
             _validate_follow_up_rules(payload, context or {})
         return payload
@@ -63,6 +68,23 @@ class SchemaRegistry:
 def validate_question_generation(payload: Any) -> dict[str, Any]:
     root = Path(__file__).resolve().parents[2] / "schemas"
     return SchemaRegistry(root).validate("QUESTION_GENERATION", payload)
+
+
+def validate_question_variant(
+    payload: Any,
+    *,
+    question_set_id: str | None = None,
+    source_question_id: str | None = None,
+) -> dict[str, Any]:
+    root = Path(__file__).resolve().parents[2] / "schemas"
+    return SchemaRegistry(root).validate(
+        "QUESTION_VARIANT",
+        payload,
+        context={
+            "questionSetId": question_set_id,
+            "sourceQuestionId": source_question_id,
+        },
+    )
 
 
 def _validate_node(value: Any, schema: dict[str, Any], path: str) -> None:
@@ -216,6 +238,23 @@ def _validate_evaluation_rules(payload: dict[str, Any], context: dict[str, Any])
         raise ValidationError("AI evaluation output must contain exactly one record for every answer")
     if question_ids is not None and seen_questions != set(question_ids):
         raise ValidationError("AI evaluation output must contain exactly one record for every question")
+
+
+def _validate_question_variant_rules(
+    payload: dict[str, Any], context: dict[str, Any]
+) -> None:
+    expected_question_set_id = context.get("questionSetId")
+    expected_source_question_id = context.get("sourceQuestionId")
+    if (
+        expected_question_set_id is not None
+        and payload["questionSetId"] != expected_question_set_id
+    ):
+        raise ValidationError("AI question variant references an unknown question set")
+    if (
+        expected_source_question_id is not None
+        and payload["sourceQuestionId"] != expected_source_question_id
+    ):
+        raise ValidationError("AI question variant references an unknown source question")
 
 
 def _normalize_question(value: str) -> str:

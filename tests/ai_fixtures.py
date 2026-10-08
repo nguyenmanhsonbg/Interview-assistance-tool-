@@ -1,6 +1,31 @@
 from tests.test_question_generation import ai_payload as question_generation_payload
 
 
+def question_variant_payload():
+    return {
+        "schemaVersion": "question-variant.v1",
+        "operation": "GENERATE_QUESTION_VARIANT",
+        "mode": "USER_PROMPT",
+        "questionSetId": "set-1",
+        "sourceQuestionId": "question-1",
+        "variant": {
+            "questionText": "Hãy mô tả một quyết định kỹ thuật khó và cách bạn đánh giá trade-off.",
+            "purpose": "Đánh giá khả năng ra quyết định kỹ thuật.",
+            "nextStepObjective": "Làm rõ bằng chứng và tác động của quyết định.",
+            "expectedEvidence": "Một ví dụ cụ thể, các lựa chọn đã cân nhắc và kết quả.",
+            "rubric": {
+                "score0": "Không có ví dụ.",
+                "score1": "Ví dụ mơ hồ, thiếu vai trò cá nhân.",
+                "score2": "Có ví dụ nhưng phân tích còn hạn chế.",
+                "score3": "Có ví dụ rõ và giải thích trade-off hợp lý.",
+                "score4": "Có bằng chứng sâu, đo lường được và lập luận chặt chẽ.",
+            },
+        },
+        "confidence": 0.82,
+        "limitations": [],
+    }
+
+
 def answer_evaluation_payload(answered=True):
     return {
         "schemaVersion": "answer-evaluation.v1",

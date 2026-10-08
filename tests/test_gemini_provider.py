@@ -207,6 +207,29 @@ class GeminiProviderTests(unittest.TestCase):
         self.assertEqual("OBJECT", captured[0]["generationConfig"]["responseSchema"]["type"])
         self.assertEqual("OBJECT", captured[1]["generationConfig"]["responseSchema"]["type"])
 
+    def test_question_variant_operation_uses_fixed_response_schema(self):
+        captured = []
+
+        def opener(request, timeout):
+            captured.append(json.loads(request.data.decode("utf-8")))
+            return FakeResponse(gemini_response('{"schemaVersion":"question-variant.v1"}'))
+
+        provider = self.make_provider(opener, models=("gemini-3.6-flash",))
+        provider.generate_question_variant({"mode": "SAME_GROUP"})
+
+        body = captured[0]
+        self.assertIn("GENERATE_QUESTION_VARIANT", body["contents"][0]["parts"][0]["text"])
+        self.assertIn("question-variant.v1", body["contents"][0]["parts"][0]["text"])
+        schema = body["generationConfig"]["responseSchema"]
+        self.assertEqual(
+            [
+                "schemaVersion", "operation", "mode", "questionSetId",
+                "sourceQuestionId", "variant", "confidence", "limitations",
+            ],
+            schema["required"],
+        )
+        self.assertEqual(["USER_PROMPT", "SAME_GROUP"], schema["properties"]["mode"]["enum"])
+
     def test_two_pass_response_schemas_declare_nested_required_fields(self):
         captured = []
 

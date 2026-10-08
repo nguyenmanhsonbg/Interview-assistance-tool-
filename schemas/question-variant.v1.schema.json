@@ -1,0 +1,44 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {"const": "question-variant.v1"},
+    "operation": {"const": "GENERATE_QUESTION_VARIANT"},
+    "mode": {"type": "string", "enum": ["USER_PROMPT", "SAME_GROUP"]},
+    "questionSetId": {"type": "string", "minLength": 1},
+    "sourceQuestionId": {"type": "string", "minLength": 1},
+    "variant": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "questionText": {"type": "string", "minLength": 1, "maxLength": 4000},
+        "purpose": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "nextStepObjective": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "expectedEvidence": {"type": "string", "minLength": 1, "maxLength": 4000},
+        "rubric": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "score0": {"type": "string", "minLength": 1, "maxLength": 2000},
+            "score1": {"type": "string", "minLength": 1, "maxLength": 2000},
+            "score2": {"type": "string", "minLength": 1, "maxLength": 2000},
+            "score3": {"type": "string", "minLength": 1, "maxLength": 2000},
+            "score4": {"type": "string", "minLength": 1, "maxLength": 2000}
+          },
+          "required": ["score0", "score1", "score2", "score3", "score4"]
+        }
+      },
+      "required": ["questionText", "purpose", "nextStepObjective", "expectedEvidence", "rubric"]
+    },
+    "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+    "limitations": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {"type": "string", "maxLength": 1000}
+    }
+  },
+  "required": [
+    "schemaVersion", "operation", "mode", "questionSetId",
+    "sourceQuestionId", "variant", "confidence", "limitations"
+  ]
+}

@@ -14,6 +14,9 @@ RETRY_REPAIR_INSTRUCTION = (
 
 _PROMPTS = {
     "question_generation": ("question_generation_prompt.md", "question-generation.v1"),
+    "question_variant_generation": (
+        "question_variant_generation_prompt.md", "question-variant.v1"
+    ),
     "answer_evaluation": ("answer_evaluation_prompt.md", "answer-evaluation.v1"),
     "answer_evaluation_v2": ("answer_evaluation_prompt_v2.md", "answer-evaluation.v2"),
     "answer_evidence_analysis": ("answer_evidence_analysis_prompt.md", "answer-evidence.v1"),
