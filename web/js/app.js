@@ -1061,8 +1061,11 @@ function renderQuestionVariantPreview(host, question, proposal, questionSet, cas
       await onRefresh();
     } catch (error) {
       if (["QUESTION_SET_STALE", "STATE_CONFLICT", "QUESTION_VARIANT_STALE"].includes(error.code)) {
-        showError({ code: error.code, message: "Question Set đã thay đổi. Hãy tải lại trước khi áp dụng đề xuất." }, host);
         await onRefresh();
+        showError(
+          { code: error.code, message: "Question Set đã thay đổi. Hãy tải lại trước khi áp dụng đề xuất." },
+          document.querySelector("#question-detail-panel") || mainElement(),
+        );
         return;
       }
       throw error;

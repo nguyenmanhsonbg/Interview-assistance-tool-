@@ -203,6 +203,7 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("assessmentAttemptId", scripts)
         self.assertIn("mutationLocked", scripts)
         self.assertIn("result?.task?.proposalId", scripts)
+        self.assertIn("await onRefresh();\n        showError(", scripts)
 
     def test_two_pass_evaluation_progress_preserves_previous_result_provenance(self):
         root = Path(__file__).resolve().parents[1] / "web"
