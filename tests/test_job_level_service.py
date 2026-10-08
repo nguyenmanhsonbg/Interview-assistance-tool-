@@ -120,6 +120,40 @@ class JobLevelServiceTests(MigratedDatabaseFixture, unittest.TestCase):
         self.assertIsNone(job[0])
         self.assertNotEqual("READY", job[1])
 
+    def test_new_confirmed_jd_fingerprint_reprovisions_level_after_ready(self):
+        service = self.service()
+        first = service.request_for_confirmed_jd(self.case_id)
+        service.process(first["id"], LevelProvider())
+
+        replacement = self.documents.import_manual_text(
+            self.case_id, "JD", "Junior Backend Engineer\n1 year of experience"
+        )
+        self.documents.confirm(replacement["id"], replacement["contentSha256"])
+
+        second = service.request_for_confirmed_jd(self.case_id)
+
+        self.assertIsNotNone(second)
+        self.assertNotEqual(first["id"], second["id"])
+        self.assertEqual("EXTRACT_JOB_LEVEL", second["taskType"])
+
+    def test_stale_extraction_does_not_reset_newer_jd_extraction(self):
+        service = self.service()
+        first = service.request_for_confirmed_jd(self.case_id)
+        replacement = self.documents.import_manual_text(
+            self.case_id, "JD", "Junior Backend Engineer\n1 year of experience"
+        )
+        self.documents.confirm(replacement["id"], replacement["contentSha256"])
+        second = service.request_for_confirmed_jd(self.case_id)
+
+        service.process(first["id"], LevelProvider())
+
+        with self.database.connection() as connection:
+            status = connection.execute(
+                "SELECT target_level_status FROM jobs WHERE id=?", (self.job_id,)
+            ).fetchone()[0]
+        self.assertEqual("EXTRACTING", status)
+        self.assertNotEqual(first["id"], second["id"])
+
     def test_provider_failure_marks_level_failed_without_default(self):
         service = self.service()
         task = service.request_for_confirmed_jd(self.case_id)

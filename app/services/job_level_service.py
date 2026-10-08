@@ -76,9 +76,13 @@ class JobLevelService:
             elif retry:
                 raise StateConflict("No failed extraction exists for the current JD")
             elif row["target_level_status"] == "READY":
-                return None
+                if row["target_level_source"] != "JD_AI":
+                    return None
             elif row["target_level_status"] == "EXTRACTING":
-                raise StateConflict("Job level extraction is already in progress")
+                pass
+
+            if row["target_level_status"] in {"READY", "EXTRACTING"}:
+                self._reset_for_new_jd(row["job_id"])
 
             idempotency_key = (
                 f"job-level:{case_id}:{row['document_id']}:{row['document_version']}"
@@ -150,9 +154,10 @@ class JobLevelService:
     def _current_jd(self, case_id: str):
         with self.database.connection() as connection:
             return connection.execute(
-                """SELECT ic.status case_status, ic.job_id,
+                """SELECT ic.id case_id, ic.status case_status, ic.job_id,
                           j.position_title, j.updated_at job_updated_at,
                           j.target_level_status,
+                          j.target_level_source,
                           d.id document_id, d.version_no document_version,
                           d.content_sha256 document_hash, d.extracted_text,
                           c.full_name
@@ -190,11 +195,15 @@ class JobLevelService:
         with case_mutation_lock(task["interviewCaseId"]):
             with self.database.transaction() as connection:
                 row = connection.execute(
-                    """SELECT ic.status case_status, j.id job_id,
-                              j.target_level_status, d.id document_id,
+                    """SELECT ic.id case_id, ic.status case_status,
+                              j.id job_id, j.position_title,
+                              j.updated_at job_updated_at, j.target_level_status,
+                              d.id document_id,
                               d.version_no document_version, d.content_sha256 document_hash,
-                              d.is_current, d.is_ai_eligible
+                              d.extracted_text, d.is_current, d.is_ai_eligible,
+                              c.full_name
                        FROM interview_cases ic
+                       JOIN candidates c ON c.id=ic.candidate_id
                        JOIN jobs j ON j.id=ic.job_id
                        JOIN documents d ON d.interview_case_id=ic.id
                        WHERE ic.id=? AND d.document_type='JD' AND d.is_current=1""",
@@ -212,7 +221,8 @@ class JobLevelService:
                     and row["case_status"] in _MUTABLE_CASE_STATES
                 )
                 if not current:
-                    if row is not None and row["target_level_status"] == "EXTRACTING":
+                    if row is not None and row["target_level_status"] == "EXTRACTING" \
+                            and not self._has_newer_extraction(connection, task, row):
                         connection.execute(
                             """UPDATE jobs SET target_level_status='PENDING',
                                updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
@@ -248,18 +258,63 @@ class JobLevelService:
                    finished_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?""",
                 (task["id"],),
             )
-            connection.execute(
-                """UPDATE jobs SET target_level_status='PENDING',
-                   updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
-                   WHERE id=(SELECT job_id FROM interview_cases WHERE id=?)
-                     AND target_level_status='EXTRACTING'""",
+            row = connection.execute(
+                """SELECT ic.id case_id, j.id job_id, j.position_title,
+                          j.updated_at job_updated_at, d.id document_id,
+                          d.version_no document_version, d.content_sha256 document_hash,
+                          d.extracted_text, d.is_current, d.is_ai_eligible,
+                          c.full_name
+                   FROM interview_cases ic
+                   JOIN candidates c ON c.id=ic.candidate_id
+                   JOIN jobs j ON j.id=ic.job_id
+                   LEFT JOIN documents d ON d.interview_case_id=ic.id
+                       AND d.document_type='JD' AND d.is_current=1
+                   WHERE ic.id=?""",
                 (task["interviewCaseId"],),
-            )
+            ).fetchone()
+            if row is not None and row["is_current"] and row["is_ai_eligible"] \
+                    and not self._has_newer_extraction(connection, task, row):
+                connection.execute(
+                    """UPDATE jobs SET target_level_status='PENDING',
+                       updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                       WHERE id=? AND target_level_status='EXTRACTING'""",
+                    (row["job_id"],),
+                )
             append_audit(
                 connection, actor_type="SYSTEM", action="AI_TASK_FAILED",
                 entity_type="AI_TASK", entity_id=task["id"],
                 metadata={"errorCode": "AI_STALE_INPUT", "retryable": False},
             )
+
+    def _reset_for_new_jd(self, job_id: str) -> None:
+        # The previous level belongs to an older confirmed JD. Keep the
+        # question-generation gate closed until the new fingerprint is ready.
+        # The caller holds the case mutation lock, so a concurrent confirm or
+        # retry cannot observe the intermediate pending state and enqueue a
+        # duplicate task.
+        with self.database.transaction() as connection:
+            connection.execute(
+                """UPDATE jobs SET target_level=NULL, target_level_status='PENDING',
+                   target_level_source=NULL, target_level_confidence=NULL,
+                   updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                   WHERE id=? AND target_level_status IN ('READY', 'EXTRACTING')""",
+                (job_id,),
+            )
+
+    def _has_newer_extraction(self, connection, task: dict[str, Any], row) -> bool:
+        if not row["document_id"] or not row["extracted_text"]:
+            return False
+        manifest = self._manifest(row)
+        fingerprint = _fingerprint(manifest)
+        newer = connection.execute(
+            """SELECT 1 FROM ai_tasks
+               WHERE interview_case_id=? AND task_type='EXTRACT_JOB_LEVEL'
+                 AND id<>? AND input_fingerprint=?
+                 AND status IN ('PENDING', 'PENDING_RETRY', 'RUNNING', 'COMPLETED')
+               LIMIT 1""",
+            (task["interviewCaseId"], task["id"], fingerprint),
+        ).fetchone()
+        return newer is not None
 
 
 def _fingerprint(manifest: dict[str, Any]) -> str:
