@@ -1061,7 +1061,7 @@ function openQuestionAdditionDetails(proposal, questionSet, caseId, onRefresh) {
   const opener = document.activeElement;
   const backdrop = element("div", undefined, "modal-backdrop question-addition-detail");
   const modal = element("section", undefined, "modal question-addition-detail-modal");
-  const host = modal;
+  const errorHost = modal;
   modal.setAttribute("role", "dialog");
   modal.setAttribute("aria-modal", "true");
   const closeModal = () => {
@@ -1074,7 +1074,7 @@ function openQuestionAdditionDetails(proposal, questionSet, caseId, onRefresh) {
   };
   const card = element("section", undefined, "card stack question-addition-proposal");
   const heading = element("div", undefined, "question-addition-status");
-  heading.append(element("h3", "CÃ¢u há»i má»›i Ä‘á» xuáº¥t"), element("span", safeText(proposal.status), "badge warning"));
+  heading.append(element("h3", "Câu hỏi mới đề xuất"), element("span", safeText(proposal.status), "badge warning"));
   const question = proposal.question || {};
   const meta = element("div", undefined, "actions");
   meta.append(
@@ -1084,9 +1084,9 @@ function openQuestionAdditionDetails(proposal, questionSet, caseId, onRefresh) {
     element("span", safeText(question.difficulty), "badge"),
   );
   const suggested = element("div", undefined, "stack");
-  suggested.append(element("strong", "CÃ¢u há»i Ä‘á» xuáº¥t"), element("div", safeText(question.questionText), "answer-text"));
+  suggested.append(element("strong", "Câu hỏi đề xuất"), element("div", safeText(question.questionText), "answer-text"));
   const actions = element("div", undefined, "actions");
-  const apply = button("DÃ¹ng cÃ¢u há»i nÃ y", async () => {
+  const apply = button("Dùng câu hỏi này", async () => {
     try {
       await apiFetch(questionAdditionPath(caseId, proposal.proposalId) + "/apply", {
         method: "POST",
@@ -1102,13 +1102,13 @@ function openQuestionAdditionDetails(proposal, questionSet, caseId, onRefresh) {
     } catch (error) {
       await onRefresh();
       if (["STATE_CONFLICT", "QUESTION_SET_STALE"].includes(error.code)) {
-        showError({ code: error.code, message: "Question Set Ä‘Ã£ thay Ä‘á»•i. HÃ£y táº£i láº¡i trÆ°á»›c khi Ã¡p dá»¥ng Ä‘á» xuáº¥t." }, host);
+        showError({ code: error.code, message: "Question Set đã thay đổi. Hãy tải lại trước khi áp dụng đề xuất." }, errorHost);
         return;
       }
       throw error;
     }
   }, "primary");
-  const regenerate = button("Táº¡o láº¡i", async () => {
+  const regenerate = button("Tạo lại", async () => {
     await apiFetch(questionAdditionPath(caseId, proposal.proposalId) + "/discard", { method: "POST" });
     clearActiveQuestionAddition(caseId, questionSet.id, proposal.targetCategory);
     closeModal();
@@ -1124,7 +1124,7 @@ function openQuestionAdditionDetails(proposal, questionSet, caseId, onRefresh) {
     await requestQuestionAddition(caseId, questionSet.id, proposal.targetCategory, "AUTO_GROUP", null);
     await onRefresh();
   }, "secondary");
-  const discard = button("Bá» qua", async () => {
+  const discard = button("Bỏ qua", async () => {
     await apiFetch(questionAdditionPath(caseId, proposal.proposalId) + "/discard", { method: "POST" });
     clearActiveQuestionAddition(caseId, questionSet.id, proposal.targetCategory);
     closeModal();
@@ -1152,7 +1152,7 @@ function renderQuestionAdditionProposal(host, proposal, questionSet, caseId, onR
   const heading = element("div", undefined, "question-addition-status");
   heading.append(element("h3", "Câu hỏi mới"), element("span", safeText(proposal.status), "badge warning"));
   const summary = element("div", undefined, "stack-sm");
-  summary.append(element("strong", "Tóm tắt câu hỏi"), element("span", safeText(question.questionText), "question-addition-summary-text"));
+  summary.append(element("span", safeText(question.questionText), "question-addition-summary-text"));
   const meta = element("div", undefined, "actions");
   meta.append(
     element("span", categoryLabel(proposal.targetCategory), "badge"),

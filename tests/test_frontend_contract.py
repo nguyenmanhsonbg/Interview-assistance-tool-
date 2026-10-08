@@ -257,7 +257,10 @@ class FrontendContractTests(unittest.TestCase):
         choice_start = scripts.index("function openQuestionAdditionChoice")
         prompt_start = scripts.index("function openQuestionAdditionPrompt")
         proposal_start = scripts.index("function renderQuestionAdditionFields")
+        detail_start = scripts.index("function openQuestionAdditionDetails")
+        detail_end = scripts.index("function renderQuestionAdditionProposal")
         popup_copy = scripts[choice_start:proposal_start]
+        detail_copy = scripts[detail_start:detail_end]
 
         self.assertNotIn("Ã", popup_copy)
         self.assertNotIn("Â", popup_copy)
@@ -272,6 +275,17 @@ class FrontendContractTests(unittest.TestCase):
         ):
             self.assertIn(marker, popup_copy)
         self.assertLess(choice_start, prompt_start)
+        for marker in (
+            "C\u00e2u h\u1ecfi m\u1edbi \u0111\u1ec1 xu\u1ea5t",
+            "C\u00e2u h\u1ecfi \u0111\u1ec1 xu\u1ea5t",
+            "D\u00f9ng c\u00e2u h\u1ecfi n\u00e0y",
+            "T\u1ea1o l\u1ea1i",
+            "B\u1ecf qua",
+            "Question Set \u0111\u00e3 thay \u0111\u1ed5i. H\u00e3y t\u1ea3i l\u1ea1i tr\u01b0\u1edbc khi \u00e1p d\u1ee5ng \u0111\u1ec1 xu\u1ea5t.",
+        ):
+            self.assertIn(marker, detail_copy)
+        for marker in ("\u00c3", "\u00c4", "\u0081", "\u008f"):
+            self.assertNotIn(marker, detail_copy)
 
     def test_question_addition_proposal_uses_summary_card_and_detail_modal(self):
         root = Path(__file__).resolve().parents[1] / "web"
@@ -287,6 +301,7 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn('setAttribute("aria-haspopup", "dialog")', scripts)
         self.assertIn("openQuestionAdditionDetails(proposal, questionSet, caseId, onRefresh)", scripts)
         self.assertNotIn("renderQuestionAdditionFields(question)", summary_renderer)
+        self.assertNotIn("T\u00f3m t\u1eaft c\u00e2u h\u1ecfi", summary_renderer)
 
     def test_questions_workspace_restores_selected_question_after_refresh(self):
         root = Path(__file__).resolve().parents[1] / "web"
