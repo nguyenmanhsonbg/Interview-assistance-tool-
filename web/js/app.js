@@ -785,7 +785,12 @@ async function renderDocuments(caseId) {
     const grid = element("div", undefined, "content-grid");
     grid.append(buildDocumentCard(caseId, "JD", current("JD")), buildDocumentCard(caseId, "CV", current("CV")));
     view.append(grid);
-    const ready = Boolean(current("JD")?.isAiEligible && current("CV")?.isAiEligible);
+    const levelReadyForQuestions = item.job?.targetLevelStatus === "READY";
+    const ready = Boolean(
+      current("JD")?.isAiEligible
+      && current("CV")?.isAiEligible
+      && levelReadyForQuestions,
+    );
     const actions = element("div", undefined, "actions");
     const next = link("Tiếp: Bộ câu hỏi", stepHref(caseId, "questions"), "primary-link");
     next.setAttribute("aria-disabled", ready ? "false" : "true");
@@ -793,7 +798,15 @@ async function renderDocuments(caseId) {
       if (!ready) event.preventDefault();
     });
     actions.append(next);
-    if (!ready) actions.append(element("span", "Cần xác nhận đủ JD và CV trước khi sinh câu hỏi.", "muted"));
+    if (!ready) {
+      actions.append(element(
+        "span",
+        levelReadyForQuestions
+          ? "Cần xác nhận đủ JD và CV trước khi sinh câu hỏi."
+          : "Cần xác định level từ JD trước khi sang bước Câu hỏi.",
+        "muted",
+      ));
+    }
     view.append(actions);
     return view;
   });

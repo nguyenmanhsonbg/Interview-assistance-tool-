@@ -171,6 +171,7 @@ class FrontendContractTests(unittest.TestCase):
         self.assertNotIn("values.targetLevel", scripts)
         self.assertNotIn("targetLevel: values", scripts)
         self.assertIn('targetLevelStatus === "READY"', scripts)
+        self.assertIn("levelReadyForQuestions", scripts)
         self.assertIn("Cần xác định level từ JD trước khi tạo Question Set.", scripts)
 
     def test_jd_level_extraction_ui_has_status_progress_and_retry(self):
