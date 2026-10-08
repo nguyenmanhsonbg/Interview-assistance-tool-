@@ -11,8 +11,6 @@ class FrontendContractTests(unittest.TestCase):
         for route in (
             "/documents",
             "/questions",
-            "/question-set/export",
-            "/assessment-snapshots/import",
             "/ai/evaluate",
             "/ai/evaluation",
         ):
@@ -29,7 +27,6 @@ class FrontendContractTests(unittest.TestCase):
             self.assertNotIn(removed, scripts)
         self.assertIn("apiDownload", scripts)
         self.assertIn("apiUpload", scripts)
-        self.assertIn('file.accept = ".xlsx"', scripts)
         self.assertIn('pdf.input.accept = ".pdf,application/pdf"', scripts)
         self.assertIn("contentBase64: await fileToBase64(file)", scripts)
         self.assertIn("textContent", scripts)
@@ -41,7 +38,7 @@ class FrontendContractTests(unittest.TestCase):
         self.assertNotIn("jobCode", scripts)
         self.assertNotIn("scheduledAt", scripts)
 
-    def test_html_candidate_transfer_is_primary_and_excel_is_explicit_fallback(self):
+    def test_html_candidate_transfer_is_the_only_question_export_action(self):
         root = Path(__file__).resolve().parents[1] / "web"
         scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
         self.assertIn("/candidate-package/export", scripts)
@@ -49,8 +46,21 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("candidate-html.v1", scripts)
         self.assertIn('htmlFile.accept = ".html,text/html"', scripts)
         self.assertIn('contentType: "text/html"', scripts)
-        self.assertIn("Excel fallback", scripts)
         self.assertIn("MAX_HTML_PACKAGE_BYTES", scripts)
+        self.assertNotIn("/question-set/export", scripts)
+        self.assertNotIn("Excel fallback", scripts)
+
+    def test_answers_screen_uses_centered_html_import_without_excel_section(self):
+        root = Path(__file__).resolve().parents[1] / "web"
+        styles = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.css"))
+        scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
+
+        self.assertIn("answer-import-card", scripts)
+        self.assertNotIn("const excelFallback", scripts)
+        self.assertNotIn("Excel fallback .xlsx", scripts)
+        self.assertNotIn("Chưa có assessment snapshot.", scripts)
+        self.assertIn("width: min(100%, 640px)", styles)
+        self.assertIn("margin-inline: auto", styles)
 
     def test_no_third_party_runtime_import_manifest_exists(self):
         root = Path(__file__).resolve().parents[1]
@@ -145,11 +155,54 @@ class FrontendContractTests(unittest.TestCase):
         for marker in (
             "const taskRunning = Boolean(",
             '"Đang sinh bộ câu hỏi"',
-            "empty.append(taskHost);",
             "if (taskRunning) {",
+            "empty.append(taskHost);",
+            "if (!taskRunning) {",
             "empty.append(generate, manual);",
         ):
             self.assertIn(marker, scripts)
+        self.assertLess(scripts.index("empty.append(taskHost);"), scripts.index("if (!taskRunning) {"))
+
+    def test_questions_screen_removes_legacy_copy_and_excel_button(self):
+        root = Path(__file__).resolve().parents[1] / "web"
+        scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
+
+        self.assertNotIn("Số lượng hiển thị lấy trực tiếp từ dữ liệu question set; không hardcode theo layout.", scripts)
+        self.assertNotIn("Excel fallback: xuất bộ câu hỏi", scripts)
+        self.assertNotIn("/question-set/export", scripts)
+
+    def test_question_variant_workflow_uses_proposal_first_actions(self):
+        root = Path(__file__).resolve().parents[1] / "web"
+        styles = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.css"))
+        scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
+
+        for marker in (
+            "Gen theo prompt",
+            "Tự động gen câu khác",
+            "Sửa bằng tay",
+            "GENERATE_QUESTION_VARIANT",
+            '"USER_PROMPT"',
+            '"SAME_GROUP"',
+            "/variants",
+            "/discard",
+            "/apply",
+            "Dùng câu này",
+            "Tạo lại",
+            "Bỏ qua",
+            "expectedQuestionSetUpdatedAt",
+            "expectedSourceFingerprint",
+            "proposalId",
+            "question-variant",
+            "2000",
+            "question-prompt-count",
+        ):
+            self.assertIn(marker, scripts)
+        for marker in ("question-actions", "question-variant-preview", "question-prompt-modal", "question-variant-status"):
+            self.assertIn(marker, styles + scripts)
+        self.assertIn('questionSet.status !== "APPROVED"', scripts)
+        self.assertIn("assessmentAttemptId", scripts)
+        self.assertIn("mutationLocked", scripts)
+        self.assertIn("result?.task?.proposalId", scripts)
 
     def test_two_pass_evaluation_progress_preserves_previous_result_provenance(self):
         root = Path(__file__).resolve().parents[1] / "web"
@@ -168,6 +221,34 @@ class FrontendContractTests(unittest.TestCase):
             self.assertIn(marker, scripts)
         self.assertNotIn("Interview Brief", scripts)
         self.assertNotIn("recommendedLiveQuestions", scripts)
+
+    def test_ai_evaluation_result_has_summary_first_and_collapsible_answer_review(self):
+        root = Path(__file__).resolve().parents[1] / "web"
+        styles = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.css"))
+        scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
+
+        for marker in (
+            "evaluation-result",
+            "evaluation-header",
+            "evaluation-summary",
+            "evaluation-findings",
+            "evaluation-competencies",
+            "evaluation-answers",
+            "evaluation-answer",
+            'const details = document.createElement("details")',
+            "details.open = index === 0",
+            "evaluation-answer-grid",
+        ):
+            self.assertIn(marker, scripts)
+        for marker in (
+            ".evaluation-result",
+            ".evaluation-header",
+            ".evaluation-summary",
+            ".evaluation-findings",
+            ".evaluation-answer",
+            ".evaluation-answer-grid",
+        ):
+            self.assertIn(marker, styles)
 
 
 if __name__ == "__main__":

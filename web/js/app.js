@@ -8,7 +8,6 @@ skipLink?.addEventListener("click", (event) => {
   event.preventDefault();
   document.querySelector("#main-content")?.focus();
 });
-const MAX_WORKBOOK_BYTES = 10 * 1024 * 1024;
 const MAX_HTML_PACKAGE_BYTES = 10 * 1024 * 1024;
 const HTML_PACKAGE_FORMAT = "candidate-html.v1";
 const MAX_DOCUMENT_BYTES = 7_500_000;
@@ -815,10 +814,11 @@ async function waitForTask(taskId, host, label = "Tác vụ AI") {
   return promise;
 }
 
-function resumeTask(caseId, step, taskId, host, refresh, label = "Tác vụ AI") {
+function resumeTask(caseId, step, taskId, host, refresh, label = "Tác vụ AI", onCompleted = null) {
   window.setTimeout(() => {
     waitForTask(taskId, host, label)
       .then((result) => {
+        if (result && onCompleted) onCompleted(result);
         if (result && isActiveCaseStep(caseId, step)) return refresh();
         return null;
       })
@@ -865,7 +865,283 @@ function renderRubric(rubric) {
   return details;
 }
 
-function renderQuestionDetail(question, questionSet, caseId, onRefresh) {
+const QUESTION_VARIANT_OPERATION = "GENERATE_QUESTION_VARIANT";
+const QUESTION_VARIANT_SCHEMA = "question-variant.v1";
+const MAX_VARIANT_PROMPT_CHARS = 2000;
+
+function questionVariantPath(caseId, questionId, variantId = "") {
+  const base = "/api/v1/interview-cases/" + encodeURIComponent(caseId)
+    + "/question-set/questions/" + encodeURIComponent(questionId) + "/variants";
+  return variantId ? base + "/" + encodeURIComponent(variantId) : base;
+}
+
+async function restoreActiveQuestionVariantTask(caseId, questionSet, taskId) {
+  if (!taskId) return;
+  const current = getState().activeQuestionVariant;
+  if (current?.taskId === taskId) return;
+  const result = await apiFetch("/api/v1/tasks/" + encodeURIComponent(taskId));
+  const task = result.task;
+  if (task.taskType !== QUESTION_VARIANT_OPERATION || !task.sourceQuestionId) return;
+  if (!["PENDING", "RUNNING", "PENDING_RETRY"].includes(task.status)) return;
+  setState({
+    activeQuestionVariant: {
+      caseId,
+      questionSetId: questionSet.id,
+      questionId: task.sourceQuestionId,
+      taskId,
+      proposalId: null,
+      mode: null,
+    },
+  });
+}
+
+function activeQuestionVariant(caseId, questionSetId, questionId) {
+  const variant = getState().activeQuestionVariant;
+  return variant?.caseId === caseId
+    && variant.questionSetId === questionSetId
+    && variant.questionId === questionId
+    ? variant
+    : null;
+}
+
+function clearActiveQuestionVariant(caseId, questionSetId, questionId) {
+  const variant = activeQuestionVariant(caseId, questionSetId, questionId);
+  if (variant) setState({ activeQuestionVariant: null });
+}
+
+async function requestQuestionVariant(caseId, questionSet, question, mode, prompt, onRefresh) {
+  const task = await apiFetch(questionVariantPath(caseId, question.id), {
+    method: "POST",
+    body: JSON.stringify({
+      questionSetId: questionSet.id,
+      operation: QUESTION_VARIANT_OPERATION,
+      mode,
+      ...(prompt ? { prompt } : {}),
+    }),
+  });
+  setState({
+    activeQuestionVariant: {
+      caseId,
+      questionSetId: questionSet.id,
+      questionId: question.id,
+      taskId: task.taskId,
+      proposalId: null,
+      mode,
+    },
+  });
+  await onRefresh();
+}
+
+function openQuestionPromptModal(caseId, questionSet, question, onRefresh) {
+  const opener = document.activeElement;
+  const backdrop = element("div", undefined, "modal-backdrop");
+  const modal = element("section", undefined, "modal question-prompt-modal");
+  modal.setAttribute("role", "dialog");
+  modal.setAttribute("aria-modal", "true");
+  const titleId = "question-prompt-title-" + question.id;
+  const descriptionId = "question-prompt-description-" + question.id;
+  const heading = element("h2", "Gen câu hỏi theo prompt");
+  heading.id = titleId;
+  const description = element("p", "Prompt chỉ là yêu cầu bổ sung cho AI; không thay đổi nhóm, vị trí hoặc quyền duyệt của HĐCM.", "muted");
+  description.id = descriptionId;
+  modal.setAttribute("aria-labelledby", titleId);
+  modal.setAttribute("aria-describedby", descriptionId);
+
+  const prompt = field("Yêu cầu bổ sung", "question-variant-prompt", {
+    type: "textarea",
+    required: true,
+    placeholder: "Ví dụ: Tập trung vào cách xử lý một tình huống thực tế...",
+  });
+  prompt.input.maxLength = MAX_VARIANT_PROMPT_CHARS;
+  prompt.input.setAttribute("aria-describedby", descriptionId + " question-prompt-count");
+  const counter = element("p", "0/" + MAX_VARIANT_PROMPT_CHARS + " ký tự", "muted");
+  counter.id = "question-prompt-count";
+  counter.setAttribute("aria-live", "polite");
+  const validation = element("p", "", "notice error");
+  validation.hidden = true;
+  prompt.input.addEventListener("input", () => {
+    counter.textContent = prompt.input.value.length + "/" + MAX_VARIANT_PROMPT_CHARS + " ký tự";
+    validation.hidden = true;
+  });
+
+  let keydownHandler;
+  const closeModal = () => {
+    document.removeEventListener("keydown", keydownHandler);
+    backdrop.remove();
+    opener?.focus?.();
+  };
+  keydownHandler = (event) => {
+    if (event.key === "Escape") closeModal();
+  };
+  const close = element("button", "Hủy", "secondary");
+  close.type = "button";
+  close.addEventListener("click", closeModal);
+  const submit = element("button", "Gen theo prompt", "primary");
+  submit.type = "submit";
+  const form = element("form", undefined, "stack");
+  form.append(prompt.label, counter, validation);
+  const actions = element("div", undefined, "actions document-actions");
+  actions.append(close, submit);
+  form.append(actions);
+  formSubmit(form, async () => {
+    const value = prompt.input.value.trim();
+    if (!value) {
+      validation.textContent = "Hãy nhập prompt trước khi tạo câu hỏi.";
+      validation.hidden = false;
+      prompt.input.focus();
+      return;
+    }
+    if (value.length > MAX_VARIANT_PROMPT_CHARS) {
+      validation.textContent = "Prompt không được vượt quá " + MAX_VARIANT_PROMPT_CHARS + " ký tự.";
+      validation.hidden = false;
+      prompt.input.focus();
+      return;
+    }
+    closeModal();
+    await requestQuestionVariant(caseId, questionSet, question, "USER_PROMPT", value, onRefresh);
+  });
+  backdrop.addEventListener("click", (event) => {
+    if (event.target === backdrop) closeModal();
+  });
+  modal.append(heading, description, form);
+  backdrop.append(modal);
+  document.addEventListener("keydown", keydownHandler);
+  document.body.append(backdrop);
+  prompt.input.focus();
+}
+
+function renderVariantFields(variant) {
+  const fields = element("div", undefined, "question-variant-fields");
+  for (const [label, value] of [
+    ["Mục đích", variant?.purpose],
+    ["Mục tiêu bước tiếp theo", variant?.nextStepObjective],
+    ["Bằng chứng cần tìm", variant?.expectedEvidence],
+  ]) {
+    const row = element("div", undefined, "detail-row");
+    row.append(element("span", label, "detail-label"), element("span", safeText(value)));
+    fields.append(row);
+  }
+  if (variant?.rubric) fields.append(renderRubric(variant.rubric));
+  return fields;
+}
+
+function renderQuestionVariantPreview(host, question, proposal, questionSet, caseId, onRefresh) {
+  host.replaceChildren();
+  if (proposal.status !== "PROPOSED") return;
+  const card = element("section", undefined, "card stack question-variant-preview");
+  const heading = element("div", undefined, "question-variant-status");
+  heading.append(
+    element("h3", "Câu hỏi đề xuất"),
+    element("span", safeText(proposal.status), "badge warning"),
+  );
+  const meta = element("p", "Mode: " + safeText(proposal.mode) + " · Schema: " + QUESTION_VARIANT_SCHEMA, "muted");
+  const columns = element("div", undefined, "question-variant-columns");
+  const current = element("div", undefined, "stack");
+  current.append(element("strong", "Câu hỏi hiện tại"), element("div", safeText(question.questionText), "answer-text"));
+  const suggested = element("div", undefined, "stack");
+  suggested.append(element("strong", "Câu hỏi đề xuất"), element("div", safeText(proposal.variant?.questionText), "answer-text"));
+  columns.append(current, suggested);
+  const preserved = element("p", "Giữ nguyên: competencyKey=" + safeText(question.competencyKey)
+    + ", questionCategory=" + safeText(question.questionCategory)
+    + ", questionType=" + safeText(question.questionType)
+    + ", difficulty=" + safeText(question.difficulty)
+    + ", displayOrder=" + safeText(question.displayOrder), "muted");
+  const actions = element("div", undefined, "actions");
+  const apply = button("Dùng câu này", async () => {
+    try {
+      await apiFetch(questionVariantPath(caseId, question.id, proposal.proposalId) + "/apply", {
+        method: "POST",
+        body: JSON.stringify({
+          questionSetId: questionSet.id,
+          expectedQuestionSetUpdatedAt: questionSet.updatedAt,
+          expectedSourceFingerprint: proposal.sourceFingerprint,
+        }),
+      });
+      clearActiveQuestionVariant(caseId, questionSet.id, question.id);
+      await onRefresh();
+    } catch (error) {
+      if (["QUESTION_SET_STALE", "STATE_CONFLICT", "QUESTION_VARIANT_STALE"].includes(error.code)) {
+        showError({ code: error.code, message: "Question Set đã thay đổi. Hãy tải lại trước khi áp dụng đề xuất." }, host);
+        await onRefresh();
+        return;
+      }
+      throw error;
+    }
+  }, "primary");
+  const regenerate = button("Tạo lại", async () => {
+    await apiFetch(questionVariantPath(caseId, question.id, proposal.proposalId) + "/discard", { method: "POST" });
+    clearActiveQuestionVariant(caseId, questionSet.id, question.id);
+    if (proposal.mode === "USER_PROMPT") {
+      openQuestionPromptModal(caseId, questionSet, question, onRefresh);
+      return;
+    }
+    await requestQuestionVariant(caseId, questionSet, question, "SAME_GROUP", null, onRefresh);
+  }, "secondary");
+  const discard = button("Bỏ qua", async () => {
+    await apiFetch(questionVariantPath(caseId, question.id, proposal.proposalId) + "/discard", { method: "POST" });
+    clearActiveQuestionVariant(caseId, questionSet.id, question.id);
+    await onRefresh();
+  }, "secondary");
+  actions.append(apply, regenerate, discard);
+  card.append(heading, meta, columns, renderVariantFields(proposal.variant), preserved, actions);
+  host.append(card);
+}
+
+function loadQuestionVariantState(host, question, questionSet, caseId, onRefresh) {
+  const state = activeQuestionVariant(caseId, questionSet.id, question.id);
+  if (state?.taskId) {
+    resumeTask(
+      caseId,
+      "questions",
+      state.taskId,
+      host,
+      onRefresh,
+      "AI đang tạo câu thay thế",
+      (result) => {
+        const proposalId = result?.task?.proposalId;
+        if (proposalId) {
+          setState({ activeQuestionVariant: { ...state, taskId: null, proposalId } });
+        }
+      },
+    );
+    return;
+  }
+  if (state?.proposalId) {
+    host.append(element("p", "Đang tải đề xuất đã tạo...", "muted"));
+    apiFetch(questionVariantPath(caseId, question.id, state.proposalId))
+      .then((proposal) => {
+        if (proposal.status === "PROPOSED") renderQuestionVariantPreview(host, question, proposal, questionSet, caseId, onRefresh);
+        else clearActiveQuestionVariant(caseId, questionSet.id, question.id);
+      })
+      .catch((error) => showError(error, host));
+    return;
+  }
+  host.append(element("p", "Đang kiểm tra đề xuất đã lưu...", "muted"));
+  apiFetch(questionVariantPath(caseId, question.id) + "?questionSetId=" + encodeURIComponent(questionSet.id))
+    .then((proposal) => {
+      const current = activeQuestionVariant(caseId, questionSet.id, question.id);
+      if (current) return;
+      const item = proposal.items?.[0];
+      if (!item || item.status !== "PROPOSED") {
+        host.replaceChildren();
+        return;
+      }
+      setState({
+        activeQuestionVariant: {
+          caseId,
+          questionSetId: questionSet.id,
+          questionId: question.id,
+          taskId: null,
+          proposalId: item.proposalId,
+          mode: item.mode,
+        },
+      });
+      renderQuestionVariantPreview(host, question, item, questionSet, caseId, onRefresh);
+    })
+    .catch((error) => showError(error, host));
+}
+
+function renderQuestionDetail(question, questionSet, caseId, onRefresh, assessmentStarted = false) {
   const detail = element("section", undefined, "card detail-panel stack");
   detail.append(element("h2", safeText(question.displayOrder) + ". " + safeText(question.questionText)));
   const rows = [
@@ -886,9 +1162,32 @@ function renderQuestionDetail(question, questionSet, caseId, onRefresh) {
     detail.append(row);
   }
   detail.append(renderRubric(question.rubric));
-  if (questionSet.status !== "APPROVED") {
+  const mutationLocked = questionSet.status === "APPROVED" || assessmentStarted;
+  const variantHost = element("div", undefined, "stack question-variant-status");
+  detail.append(variantHost);
+  if (!mutationLocked) {
+    const questionActions = element("div", undefined, "actions question-actions");
+    const activeVariant = activeQuestionVariant(caseId, questionSet.id, question.id);
+    const hasPendingVariant = Boolean(activeVariant);
+    const promptButton = button("Gen theo prompt", () => openQuestionPromptModal(caseId, questionSet, question, onRefresh), "secondary");
+    const sameGroupButton = button("Tự động gen câu khác", async () => {
+      await requestQuestionVariant(caseId, questionSet, question, "SAME_GROUP", null, onRefresh);
+    }, "secondary");
+    promptButton.disabled = hasPendingVariant;
+    sameGroupButton.disabled = hasPendingVariant;
+    questionActions.append(promptButton, sameGroupButton);
+    const editTrigger = button("Sửa bằng tay", () => {
+      edit.open = true;
+      edit.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }, "secondary");
+    questionActions.append(editTrigger);
+    detail.append(questionActions);
+  } else {
+    detail.append(element("div", "Câu hỏi đã khóa; không thể tạo proposal hoặc chỉnh sửa sau khi duyệt/bắt đầu assessment.", "notice warning"));
+  }
+  if (!mutationLocked) {
     const edit = element("details");
-    const summary = element("summary", "Chỉnh sửa nội dung câu hỏi");
+    const summary = element("summary", "Sửa bằng tay");
     const form = element("form", undefined, "stack");
     const text = field("Nội dung câu hỏi", "questionText", { type: "textarea", value: question.questionText, required: true });
     const purpose = field("Mục đích", "purpose", { type: "textarea", value: question.purpose, required: true });
@@ -914,10 +1213,11 @@ function renderQuestionDetail(question, questionSet, caseId, onRefresh) {
     edit.append(summary, form);
     detail.append(edit);
   }
+  if (!mutationLocked) loadQuestionVariantState(variantHost, question, questionSet, caseId, onRefresh);
   return detail;
 }
 
-function renderQuestionWorkspace(questionSet, caseId, onRefresh) {
+function renderQuestionWorkspace(questionSet, caseId, onRefresh, assessmentStarted = false) {
   const questions = [...(questionSet.questions || [])].sort((a, b) => a.displayOrder - b.displayOrder);
   const workspace = element("div", undefined, "master-detail");
   const master = element("div", undefined, "master-list");
@@ -957,7 +1257,7 @@ function renderQuestionWorkspace(questionSet, caseId, onRefresh) {
     }
     detailHost.replaceChildren(selected ? renderQuestionDetail(selected, questionSet, caseId, async () => {
       await onRefresh();
-    }) : element("p", "Chưa có câu hỏi.", "muted"));
+    }, assessmentStarted) : element("p", "Chưa có câu hỏi.", "muted"));
   };
   redraw();
   return workspace;
@@ -1075,9 +1375,8 @@ async function renderQuestions(caseId) {
       generate.disabled = !canGenerate;
       const manual = button("Tạo bản nháp thủ công", () => renderManualDraft(caseId), "secondary");
       manual.disabled = !canGenerate;
-      if (taskRunning) {
-        empty.append(taskHost);
-      } else {
+      empty.append(taskHost);
+      if (!taskRunning) {
         empty.append(generate, manual);
         if (!canGenerate) empty.append(element("p", "Cần xác nhận đủ JD và CV trước khi tạo Question Set.", "muted"));
       }
@@ -1089,14 +1388,20 @@ async function renderQuestions(caseId) {
     const overviewTop = element("div", undefined, "actions");
     overviewTop.append(element("span", "Version " + questionSet.versionNo, "badge"), statusBadge(questionSet.status), element("span", questionSet.questions.length + " câu", "badge"), element("span", formatDuration(questionSet.durationSeconds), "badge"));
     const questionPolicy = questionSet.questionPolicy || {};
-    overview.append(overviewTop, element("p", "Số lượng hiển thị lấy trực tiếp từ dữ liệu question set; không hardcode theo layout.", "muted"));
+    overview.append(overviewTop);
     if (questionPolicy.confidence !== undefined || questionPolicy.limitations?.length) {
       const quality = element("div", undefined, "notice");
       quality.append(element("span", "AI confidence: " + formatConfidence(questionPolicy.confidence)));
       if (questionPolicy.limitations?.length) quality.append(element("p", "Giới hạn: " + questionPolicy.limitations.join("; "), "muted"));
       overview.append(quality);
     }
-    view.append(overview, renderQuestionWorkspace(questionSet, caseId, async () => renderQuestions(caseId)));
+    if (item.activeTaskId) await restoreActiveQuestionVariantTask(caseId, questionSet, item.activeTaskId);
+    view.append(overview, renderQuestionWorkspace(
+      questionSet,
+      caseId,
+      async () => renderQuestions(caseId),
+      Boolean(item.assessmentAttemptId),
+    ));
 
     const actions = element("div", undefined, "actions");
     if (questionSet.status !== "APPROVED") {
@@ -1116,12 +1421,7 @@ async function renderQuestions(caseId) {
       saveDownload(downloaded.blob, downloaded.response.headers.get("Content-Disposition") || "candidate-assessment.html");
       location.hash = stepHref(caseId, "answers").slice(1);
     }, "primary");
-    const exportButton = button("Excel fallback: xuất bộ câu hỏi", async () => {
-      const downloaded = await apiDownload("/api/v1/interview-cases/" + encodeURIComponent(caseId) + "/question-set/export", { method: "POST" });
-      saveDownload(downloaded.blob, downloaded.response.headers.get("Content-Disposition") || "question-answer.xlsx");
-      location.hash = stepHref(caseId, "answers").slice(1);
-    }, "secondary");
-    actions.append(exportHtmlButton, exportButton, link("Tiếp: Câu trả lời", stepHref(caseId, "answers"), "link-button"));
+    actions.append(exportHtmlButton, link("Tiếp: Câu trả lời", stepHref(caseId, "answers"), "link-button"));
     view.append(actions);
     return view;
   });
@@ -1129,7 +1429,7 @@ async function renderQuestions(caseId) {
 
 function saveDownload(blob, contentDisposition) {
   const match = /filename="?([^";]+)"?/i.exec(contentDisposition || "");
-  const filename = match ? match[1] : "question-answer.xlsx";
+  const filename = match ? match[1] : "candidate-assessment.html";
   const objectUrl = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = objectUrl;
@@ -1203,7 +1503,7 @@ async function renderAnswers(caseId) {
     } catch (error) {
       if (error.status !== 404) throw error;
     }
-    const importCard = element("section", undefined, "card stack transfer-card");
+    const importCard = element("section", undefined, "card stack transfer-card answer-import-card");
     importCard.append(element("h2", "Import câu trả lời từ máy ứng viên"), element("p", "Ứng viên mở file HTML offline, nộp bài và gửi lại file response cho HĐCM.", "muted"));
     const htmlFile = document.createElement("input");
     htmlFile.type = "file";
@@ -1228,78 +1528,66 @@ async function renderAnswers(caseId) {
     }, "primary");
     importCard.append(htmlLabel, htmlImportButton);
 
-    const excelFallback = element("section", undefined, "card stack transfer-fallback");
-    excelFallback.append(element("h2", "Excel fallback"), element("p", "Dùng khi cần xử lý thủ công bằng workbook .xlsx.", "muted"));
-    const file = document.createElement("input");
-    file.type = "file";
-    file.accept = ".xlsx";
-    file.name = "question-answer-workbook";
-    let importIdempotencyKey = null;
-    file.addEventListener("change", () => { importIdempotencyKey = null; });
-    const label = element("label", "Excel fallback .xlsx");
-    label.append(file);
-    const taskNote = element("div", undefined, "stack");
-    const importButton = button("Import workbook", async () => {
-      const workbook = file.files?.[0];
-      if (!workbook) throw new Error("Hãy chọn file .xlsx");
-      if (!workbook.name.toLowerCase().endsWith(".xlsx")) throw new Error("Chỉ hỗ trợ file .xlsx");
-      if (workbook.size > MAX_WORKBOOK_BYTES) throw new Error("Workbook vượt quá 10 MB");
-      importIdempotencyKey ||= globalThis.crypto?.randomUUID?.() || "ui-upload-" + Date.now() + "-" + Math.random().toString(16).slice(2);
-      const result = await apiUpload("/api/v1/interview-cases/" + encodeURIComponent(caseId) + "/assessment-snapshots/import", workbook, {
-        headers: { "X-Idempotency-Key": importIdempotencyKey },
-      });
-      setState({ currentSnapshotId: result.snapshot.id });
-      await renderAnswers(caseId);
-    }, "primary");
-    excelFallback.append(label, importButton, taskNote);
-    view.append(importCard, excelFallback);
+    view.append(importCard);
     if (snapshot) {
       view.append(renderSnapshotWorkspace(snapshot));
       view.append(element("div", "Snapshot là immutable; AI sẽ đánh giá đúng snapshot đang hiển thị.", "notice"));
       view.append(link("Tiếp: Đánh giá AI", stepHref(caseId, "ai"), "link-button"));
-    } else {
-      view.append(element("section", "Chưa có assessment snapshot. Hãy import candidate HTML hoặc dùng Excel fallback.", "empty-state"));
     }
     return view;
   });
 }
 
-function renderListSection(title, values) {
-  const section = element("section", undefined, "stack");
+function renderListSection(title, values, className = "") {
+  const section = element("section", undefined, "stack" + (className ? " " + className : ""));
   section.append(element("h2", title));
   const list = document.createElement("ul");
-  for (const value of values || []) list.append(element("li", safeText(value)));
+  if (values?.length) {
+    for (const value of values) list.append(element("li", safeText(value)));
+  } else {
+    list.append(element("li", "Không có nội dung được ghi nhận", "muted"));
+  }
   section.append(list);
   return section;
 }
 
 function renderEvaluationResult(result, snapshot) {
   const payload = result.payload || {};
-  const section = element("div", undefined, "stack");
-  const header = element("section", undefined, "card stack");
-  const meta = element("div", undefined, "actions");
+  const section = element("div", undefined, "evaluation-result");
+  const header = element("section", undefined, "card evaluation-header");
+  const headerMain = element("div", undefined, "evaluation-header-main");
+  const headerCopy = element("div", undefined, "evaluation-header-copy");
+  headerCopy.append(element("h2", "Kết quả đánh giá AI"), element("p", "Tóm tắt kết quả phân tích để HĐCM đối chiếu theo từng nhóm bằng chứng.", "muted"));
+  const meta = element("div", undefined, "actions evaluation-meta");
   meta.append(element("span", "Result v" + safeText(result.versionNo), "badge success"), element("span", safeText(payload.schemaVersion), "badge"), element("span", "Confidence: " + formatConfidence(result.confidence ?? payload.confidence), "badge"));
   if (result.provider) meta.append(element("span", safeText(result.provider), "badge"));
   if (result.model) meta.append(element("span", safeText(result.model), "badge"));
-  header.append(meta, element("p", "Kết quả AI chỉ là thông tin hỗ trợ; HĐCM là bên đưa ra đánh giá cuối cùng.", "notice warning"));
+  meta.append(element("span", "Snapshot ID: " + safeText(result.assessmentSnapshotId || snapshot.id), "badge"));
+  headerMain.append(headerCopy, meta);
+  header.append(headerMain, element("p", "Kết quả AI chỉ là thông tin hỗ trợ; HĐCM là bên đưa ra đánh giá cuối cùng.", "notice warning"));
   section.append(header);
 
   const answeredCount = (snapshot.answers || []).filter((answer) => answer.isAnswered).length;
+  const summary = element("section", undefined, "evaluation-summary");
   const metricGrid = element("div", undefined, "metric-grid");
   for (const metric of [["Đã trả lời", answeredCount + "/" + snapshot.questions.length], ["Độ tin cậy", formatConfidence(result.confidence ?? payload.confidence)], ["Snapshot", "v" + snapshot.versionNo]]) {
     const card = element("div", undefined, "metric");
     card.append(element("span", metric[0], "muted"), element("span", metric[1], "metric-value"));
     metricGrid.append(card);
   }
-  section.append(metricGrid);
-  const summaryGrid = element("div", undefined, "content-grid");
-  summaryGrid.append(renderListSection("Điểm mạnh", payload.strengths), renderListSection("Khoảng trống", payload.gaps));
-  section.append(summaryGrid);
-  const signalsGrid = element("div", undefined, "content-grid");
-  signalsGrid.append(renderListSection("Mâu thuẫn cần xem xét", payload.conflicts), renderListSection("Rủi ro", payload.risks));
-  section.append(signalsGrid);
+  summary.append(metricGrid);
+  section.append(summary);
 
-  const competencies = element("section", undefined, "card stack");
+  const findings = element("section", undefined, "evaluation-findings");
+  const summaryGrid = element("div", undefined, "content-grid");
+  summaryGrid.append(renderListSection("Điểm mạnh", payload.strengths, "card evaluation-finding"), renderListSection("Khoảng trống", payload.gaps, "card evaluation-finding"));
+  findings.append(summaryGrid);
+  const signalsGrid = element("div", undefined, "content-grid");
+  signalsGrid.append(renderListSection("Mâu thuẫn cần xem xét", payload.conflicts, "card evaluation-finding"), renderListSection("Rủi ro", payload.risks, "card evaluation-finding"));
+  findings.append(signalsGrid);
+  section.append(findings);
+
+  const competencies = element("section", undefined, "card evaluation-competencies");
   competencies.append(element("h2", "Ma trận năng lực"));
   const competencyTable = element("div", undefined, "table-wrap");
   const table = document.createElement("table");
@@ -1308,9 +1596,17 @@ function renderEvaluationResult(result, snapshot) {
   for (const label of ["Năng lực", "Tóm tắt", "Bằng chứng", "Confidence"]) row.append(element("th", label));
   head.append(row);
   const body = document.createElement("tbody");
-  for (const item of payload.competencyEvaluations || []) {
+  const competencyItems = payload.competencyEvaluations || [];
+  for (const item of competencyItems) {
     const line = document.createElement("tr");
     line.append(element("td", item.competencyKey), element("td", item.summary), element("td", item.evidenceStatus), element("td", formatConfidence(item.confidence)));
+    body.append(line);
+  }
+  if (!competencyItems.length) {
+    const line = document.createElement("tr");
+    const empty = element("td", "Không có nội dung được ghi nhận", "muted");
+    empty.colSpan = 4;
+    line.append(empty);
     body.append(line);
   }
   table.append(head, body);
@@ -1318,29 +1614,39 @@ function renderEvaluationResult(result, snapshot) {
   competencies.append(competencyTable);
   section.append(competencies);
 
-  const answers = element("section", undefined, "stack");
+  const answers = element("section", undefined, "evaluation-answers");
   answers.append(element("h2", "Chi tiết theo câu trả lời"));
   const sourceAnswers = new Map((snapshot.answers || []).map((answer) => [answer.questionId, answer]));
   const sourceQuestions = new Map((snapshot.questions || []).map((question) => [question.questionId, question]));
-  for (const item of payload.perAnswerEvaluations || []) {
+  for (const [index, item] of (payload.perAnswerEvaluations || []).entries()) {
     const original = sourceAnswers.get(item.questionId);
     const question = sourceQuestions.get(item.questionId);
-    const card = element("article", undefined, "card stack");
+    const details = document.createElement("details");
+    details.className = "card evaluation-answer";
+    details.open = index === 0;
     const scoreLabel = item.score === null ? "NOT_ASSESSED" : "Score: " + safeText(item.score);
-    card.append(element("h3", safeText(question?.displayOrder) + ". " + safeText(question?.questionText)), element("span", safeText(item.evidenceStatus), "badge " + (item.evidenceStatus === "NOT_ASSESSED" ? "warning" : "success")), element("span", scoreLabel, "badge"));
-    const columns = element("div", undefined, "answer-columns");
+    const summary = document.createElement("summary");
+    summary.className = "evaluation-answer-summary";
+    const title = element("span", undefined, "evaluation-answer-title");
+    title.append(element("strong", safeText(question?.displayOrder) + ". " + safeText(question?.questionText)), element("span", "Question " + safeText(question?.questionId || item.questionId), "muted"));
+    const answerMeta = element("span", undefined, "evaluation-answer-meta");
+    answerMeta.append(element("span", safeText(item.evidenceStatus), "badge " + (item.evidenceStatus === "NOT_ASSESSED" ? "warning" : "success")), element("span", scoreLabel, "badge"));
+    summary.append(title, answerMeta);
+    details.append(summary);
+    const columns = element("div", undefined, "answer-columns evaluation-answer-grid");
     columns.append(
       element("div", undefined, "stack"),
       element("div", undefined, "stack"),
     );
     columns.children[0].append(element("strong", "Câu trả lời gốc"), element("div", original?.answerText || "NOT_ASSESSED", "answer-text"));
     columns.children[1].append(element("strong", "Reasoning / Evidence"), element("div", safeText(item.reasoning), "answer-text"), element("p", "Evidence: " + safeText((item.evidenceFound || []).join(", "))), element("p", "CV consistency: " + safeText(item.cvConsistency)));
-    if (item.concerns?.length) columns.children[1].append(renderListSection("Concerns", item.concerns));
-    card.append(columns);
-    answers.append(card);
+    if (item.concerns?.length) columns.children[1].append(renderListSection("Concerns", item.concerns, "evaluation-concerns"));
+    details.append(columns);
+    answers.append(details);
   }
   section.append(answers);
-  if (payload.limitations?.length) section.append(renderListSection("Giới hạn của kết quả", payload.limitations));
+  section.append(renderListSection("Giới hạn của kết quả", payload.limitations, "card evaluation-limitations"));
+  section.append(element("p", "AI hỗ trợ đối chiếu bằng chứng. Quyết định tuyển dụng thuộc HĐCM.", "notice evaluation-footer"));
   return section;
 }
 
@@ -1373,7 +1679,7 @@ async function renderAI(caseId) {
         resultSnapshot = snapshot;
       }
     }
-    const actionCard = element("section", undefined, "card stack");
+    const actionCard = element("section", undefined, "card stack evaluation-action");
     actionCard.append(element("h2", "Đánh giá dựa trên snapshot v" + snapshot.versionNo), element("p", "AI nhận JD/CV đã xác nhận và nội dung snapshot; không tự đưa ra PASS/FAIL.", "muted"));
     if (resultUsesOlderSnapshot) {
       actionCard.append(element("div", "Đang hiển thị kết quả AI của snapshot v" + resultSnapshot.versionNo + "; snapshot hiện hành là v" + snapshot.versionNo + ".", "notice warning"));
