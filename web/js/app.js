@@ -833,14 +833,12 @@ function categoryLabel(value) {
 }
 
 function questionGroups(questions) {
-  const hasCategory = questions.length > 0 && questions.every((question) => typeof question.questionCategory === "string" && question.questionCategory.trim());
-  if (!hasCategory) return [{ key: "ALL", label: "Tất cả câu hỏi", items: questions }];
   const order = ["FOUNDATION", "APPLICATION", "DEEP_DIVE"];
-  const groups = [];
-  for (const key of order) {
-    const items = questions.filter((question) => question.questionCategory === key);
-    if (items.length) groups.push({ key, label: categoryLabel(key), items });
-  }
+  const groups = order.map((key) => ({
+    key,
+    label: categoryLabel(key),
+    items: questions.filter((question) => question.questionCategory === key),
+  }));
   for (const question of questions) {
     if (!order.includes(question.questionCategory)) {
       const existing = groups.find((group) => group.key === question.questionCategory);
@@ -868,6 +866,300 @@ function renderRubric(rubric) {
 const QUESTION_VARIANT_OPERATION = "GENERATE_QUESTION_VARIANT";
 const QUESTION_VARIANT_SCHEMA = "question-variant.v1";
 const MAX_VARIANT_PROMPT_CHARS = 2000;
+const QUESTION_ADDITION_OPERATION = "GENERATE_QUESTION_ADDITION";
+const QUESTION_ADDITION_SCHEMA = "question-addition.v1";
+const MAX_ADDITION_PROMPT_CHARS = 2000;
+
+function questionAdditionPath(caseId, proposalId = "") {
+  const base = "/api/v1/interview-cases/" + encodeURIComponent(caseId)
+    + "/question-set/question-additions";
+  return proposalId ? base + "/" + encodeURIComponent(proposalId) : base;
+}
+
+function activeQuestionAddition(caseId, questionSetId, groupKey) {
+  const addition = getState().activeQuestionAddition;
+  return addition?.caseId === caseId
+    && addition.questionSetId === questionSetId
+    && addition.groupKey === groupKey
+    ? addition
+    : null;
+}
+
+function clearActiveQuestionAddition(caseId, questionSetId, groupKey) {
+  if (activeQuestionAddition(caseId, questionSetId, groupKey)) {
+    setState({ activeQuestionAddition: null });
+  }
+}
+
+async function requestQuestionAddition(caseId, questionSetId, groupKey, mode, prompt) {
+  const current = activeQuestionAddition(caseId, questionSetId, groupKey);
+  if (current) return { taskId: current.taskId, status: "DUPLICATE_IGNORED" };
+  const task = await apiFetch(questionAdditionPath(caseId), {
+    method: "POST",
+    body: JSON.stringify({
+      questionSetId,
+      questionCategory: groupKey,
+      mode,
+      ...(prompt ? { prompt } : {}),
+    }),
+  });
+  setState({
+    activeQuestionAddition: {
+      caseId,
+      questionSetId,
+      groupKey,
+      taskId: task.taskId,
+      proposalId: null,
+      mode,
+    },
+  });
+  return task;
+}
+
+async function restoreActiveQuestionAdditionTask(caseId, questionSet, taskId) {
+  if (!taskId) return;
+  const current = getState().activeQuestionAddition;
+  if (current?.taskId === taskId) return;
+  const result = await apiFetch("/api/v1/tasks/" + encodeURIComponent(taskId));
+  const task = result.task;
+  if (task.taskType !== QUESTION_ADDITION_OPERATION || !task.targetQuestionCategory) return;
+  if (!["PENDING", "RUNNING", "PENDING_RETRY"].includes(task.status)) return;
+  setState({
+    activeQuestionAddition: {
+      caseId,
+      questionSetId: questionSet.id,
+      groupKey: task.targetQuestionCategory,
+      taskId,
+      proposalId: null,
+      mode: null,
+    },
+  });
+}
+
+function openQuestionAdditionChoice(groupKey, handlers = {}) {
+  const opener = document.activeElement;
+  const backdrop = element("div", undefined, "modal-backdrop question-addition-choice");
+  const modal = element("section", undefined, "modal");
+  modal.setAttribute("role", "dialog");
+  modal.setAttribute("aria-modal", "true");
+  const heading = element("h2", "ThÃªm cÃ¢u há»i · " + categoryLabel(groupKey));
+  const description = element("p", "Chá»n cÃ¡ch táº¡o proposal cho group hiá»‡n táº¡i.", "muted");
+  const closeModal = () => {
+    document.removeEventListener("keydown", keydownHandler);
+    backdrop.remove();
+    opener?.focus?.();
+    handlers.onClose?.();
+  };
+  const keydownHandler = (event) => {
+    if (event.key === "Escape") closeModal();
+  };
+  const prompt = button("Gen theo prompt", () => {
+    closeModal();
+    handlers.onPrompt?.();
+  }, "primary");
+  const automatic = button("Tá»± Ä‘á»™ng gen", () => {
+    closeModal();
+    return handlers.onAuto?.();
+  }, "secondary");
+  const cancel = button("Há»§y", closeModal, "secondary");
+  const actions = element("div", undefined, "actions");
+  actions.append(prompt, automatic, cancel);
+  modal.append(heading, description, actions);
+  backdrop.append(modal);
+  backdrop.addEventListener("click", (event) => {
+    if (event.target === backdrop) closeModal();
+  });
+  document.addEventListener("keydown", keydownHandler);
+  document.body.append(backdrop);
+  prompt.focus();
+}
+
+function openQuestionAdditionPrompt(groupKey, handlers = {}) {
+  const opener = document.activeElement;
+  const backdrop = element("div", undefined, "modal-backdrop question-addition-prompt");
+  const modal = element("section", undefined, "modal question-prompt-modal");
+  modal.setAttribute("role", "dialog");
+  modal.setAttribute("aria-modal", "true");
+  const heading = element("h2", "Gen cÃ¢u há»i theo prompt · " + categoryLabel(groupKey));
+  const description = element("p", "Prompt lÃ  yÃªu cáº§u bá»• sung cho AI; group vÃ  quyá»n duyá»‡t váº«n do HÄCM kiá»ƒm soÃ¡t.", "muted");
+  const prompt = field("YÃªu cáº§u bá»• sung", "question-addition-prompt", {
+    type: "textarea",
+    required: true,
+    placeholder: "VÃ­ dá»¥: TÃ¬m thÃªm báº±ng chá»©ng vá» cÃ¡ch xá»­ lÃ½ incident...",
+  });
+  prompt.input.maxLength = MAX_ADDITION_PROMPT_CHARS;
+  const counter = element("p", "0/" + MAX_ADDITION_PROMPT_CHARS + " kÃ½ tá»±", "muted");
+  const validation = element("p", "", "notice error");
+  validation.hidden = true;
+  prompt.input.addEventListener("input", () => {
+    counter.textContent = prompt.input.value.length + "/" + MAX_ADDITION_PROMPT_CHARS + " kÃ½ tá»±";
+    validation.hidden = true;
+  });
+  let keydownHandler;
+  const closeModal = () => {
+    document.removeEventListener("keydown", keydownHandler);
+    backdrop.remove();
+    opener?.focus?.();
+    handlers.onClose?.();
+  };
+  keydownHandler = (event) => {
+    if (event.key === "Escape") closeModal();
+  };
+  const close = button("Há»§y", closeModal, "secondary");
+  const submit = element("button", "Gen theo prompt", "primary");
+  submit.type = "submit";
+  const form = element("form", undefined, "stack");
+  form.append(prompt.label, counter, validation);
+  const actions = element("div", undefined, "actions document-actions");
+  actions.append(close, submit);
+  form.append(actions);
+  formSubmit(form, async () => {
+    const value = prompt.input.value.trim();
+    if (!value || value.length > MAX_ADDITION_PROMPT_CHARS) {
+      validation.textContent = !value
+        ? "HÃ£y nháº­p prompt trÆ°á»›c khi táº¡o cÃ¢u há»i."
+        : "Prompt khÃ´ng Ä‘Æ°á»£c vÆ°á»£t quÃ¡ " + MAX_ADDITION_PROMPT_CHARS + " kÃ½ tá»±.";
+      validation.hidden = false;
+      prompt.input.focus();
+      return;
+    }
+    closeModal();
+    await handlers.onSubmit?.(value);
+  });
+  modal.append(heading, description, form);
+  backdrop.append(modal);
+  backdrop.addEventListener("click", (event) => {
+    if (event.target === backdrop) closeModal();
+  });
+  document.addEventListener("keydown", keydownHandler);
+  document.body.append(backdrop);
+  prompt.input.focus();
+}
+
+function renderQuestionAdditionFields(question) {
+  const fields = element("div", undefined, "question-addition-fields");
+  for (const [label, value] of [
+    ["Mục đích", question?.purpose],
+    ["Mục tiêu bước tiếp theo", question?.nextStepObjective],
+    ["Bằng chứng cần tìm", question?.expectedEvidence],
+  ]) {
+    const row = element("div", undefined, "detail-row");
+    row.append(element("span", label, "detail-label"), element("span", safeText(value)));
+    fields.append(row);
+  }
+  if (question?.rubric) fields.append(renderRubric(question.rubric));
+  return fields;
+}
+
+function renderQuestionAdditionProposal(host, proposal, questionSet, caseId, onRefresh) {
+  host.replaceChildren();
+  if (proposal.status !== "PROPOSED") return;
+  const card = element("section", undefined, "card stack question-addition-proposal");
+  const heading = element("div", undefined, "question-addition-status");
+  heading.append(element("h3", "CÃ¢u há»i má»›i Ä‘á» xuáº¥t"), element("span", safeText(proposal.status), "badge warning"));
+  const question = proposal.question || {};
+  const meta = element("div", undefined, "actions");
+  meta.append(
+    element("span", categoryLabel(proposal.targetCategory), "badge"),
+    element("span", safeText(question.sourceKind), "badge"),
+    element("span", safeText(question.questionType), "badge"),
+    element("span", safeText(question.difficulty), "badge"),
+  );
+  const suggested = element("div", undefined, "stack");
+  suggested.append(element("strong", "CÃ¢u há»i Ä‘á» xuáº¥t"), element("div", safeText(question.questionText), "answer-text"));
+  const actions = element("div", undefined, "actions");
+  const apply = button("DÃ¹ng cÃ¢u há»i nÃ y", async () => {
+    try {
+      await apiFetch(questionAdditionPath(caseId, proposal.proposalId) + "/apply", {
+        method: "POST",
+        body: JSON.stringify({
+          questionSetId: questionSet.id,
+          expectedQuestionSetUpdatedAt: questionSet.updatedAt,
+          expectedSourceFingerprint: proposal.sourceFingerprint,
+        }),
+      });
+      clearActiveQuestionAddition(caseId, questionSet.id, proposal.targetCategory);
+      await onRefresh();
+    } catch (error) {
+      await onRefresh();
+      if (["STATE_CONFLICT", "QUESTION_SET_STALE"].includes(error.code)) {
+        showError({ code: error.code, message: "Question Set Ä‘Ã£ thay Ä‘á»•i. HÃ£y táº£i láº¡i trÆ°á»›c khi Ã¡p dá»¥ng Ä‘á» xuáº¥t." }, host);
+        return;
+      }
+      throw error;
+    }
+  }, "primary");
+  const regenerate = button("Táº¡o láº¡i", async () => {
+    await apiFetch(questionAdditionPath(caseId, proposal.proposalId) + "/discard", { method: "POST" });
+    clearActiveQuestionAddition(caseId, questionSet.id, proposal.targetCategory);
+    if (proposal.mode === "USER_PROMPT") {
+      openQuestionAdditionPrompt(proposal.targetCategory, {
+        onSubmit: async (prompt) => {
+          await requestQuestionAddition(caseId, questionSet.id, proposal.targetCategory, "USER_PROMPT", prompt);
+          await onRefresh();
+        },
+      });
+      return;
+    }
+    await requestQuestionAddition(caseId, questionSet.id, proposal.targetCategory, "AUTO_GROUP", null);
+    await onRefresh();
+  }, "secondary");
+  const discard = button("Bá» qua", async () => {
+    await apiFetch(questionAdditionPath(caseId, proposal.proposalId) + "/discard", { method: "POST" });
+    clearActiveQuestionAddition(caseId, questionSet.id, proposal.targetCategory);
+    await onRefresh();
+  }, "secondary");
+  actions.append(apply, regenerate, discard);
+  card.append(heading, meta, suggested, renderQuestionAdditionFields(question), actions);
+  host.append(card);
+}
+
+function loadQuestionAdditionState(host, groupKey, questionSet, caseId, onRefresh) {
+  const state = activeQuestionAddition(caseId, questionSet.id, groupKey);
+  if (state?.taskId) {
+    resumeTask(
+      caseId,
+      "questions",
+      state.taskId,
+      host,
+      onRefresh,
+      "AI Ä‘ang thÃªm cÃ¢u há»i",
+      (result) => {
+        const proposalId = result?.task?.additionProposalId;
+        if (proposalId) setState({ activeQuestionAddition: { ...state, taskId: null, proposalId } });
+      },
+    );
+    return;
+  }
+  if (state?.proposalId) {
+    host.append(element("p", "Äang táº£i Ä‘á» xuáº¥t Ä‘Ã£ táº¡o...", "muted"));
+    apiFetch(questionAdditionPath(caseId, state.proposalId))
+      .then((proposal) => renderQuestionAdditionProposal(host, proposal, questionSet, caseId, onRefresh))
+      .catch((error) => showError(error, host));
+    return;
+  }
+  host.append(element("p", "Äang kiá»ƒm tra Ä‘á» xuáº¥t Ä‘Ã£ lÆ°u...", "muted"));
+  apiFetch(questionAdditionPath(caseId) + "?questionSetId=" + encodeURIComponent(questionSet.id) + "&questionCategory=" + encodeURIComponent(groupKey))
+    .then((result) => {
+      const current = activeQuestionAddition(caseId, questionSet.id, groupKey);
+      if (current) return;
+      const proposal = result.items?.[0];
+      if (!proposal || proposal.status !== "PROPOSED") {
+        host.replaceChildren();
+        return;
+      }
+      setState({ activeQuestionAddition: {
+        caseId,
+        questionSetId: questionSet.id,
+        groupKey,
+        taskId: null,
+        proposalId: proposal.proposalId,
+        mode: proposal.mode,
+      } });
+      renderQuestionAdditionProposal(host, proposal, questionSet, caseId, onRefresh);
+    })
+    .catch((error) => showError(error, host));
+}
 
 function questionVariantPath(caseId, questionId, variantId = "") {
   const base = "/api/v1/interview-cases/" + encodeURIComponent(caseId)
@@ -1205,8 +1497,36 @@ function renderQuestionWorkspace(questionSet, caseId, onRefresh, assessmentStart
   let restoreFocusId = selectedId;
   const redraw = () => {
     master.replaceChildren();
+    const mutationLocked = questionSet.status === "APPROVED" || assessmentStarted;
     for (const group of questionGroups(questions)) {
-      if (group.key !== "ALL") master.append(element("h3", group.label));
+      const groupSection = element("section", undefined, "question-group");
+      const groupTitle = element("div", undefined, "question-group-title");
+      const groupCopy = element("div", undefined, "stack");
+      groupCopy.append(element("h3", group.label), element("span", group.items.length + " cÃ¢u", "question-group-count"));
+      groupTitle.append(groupCopy);
+      if (["FOUNDATION", "APPLICATION", "DEEP_DIVE"].includes(group.key)) {
+        const addButton = button("ThÃªm cÃ¢u há»i", () => {
+          if (mutationLocked) return;
+          openQuestionAdditionChoice(group.key, {
+            onPrompt: () => openQuestionAdditionPrompt(group.key, {
+              onSubmit: async (prompt) => {
+                await requestQuestionAddition(caseId, questionSet.id, group.key, "USER_PROMPT", prompt);
+                await onRefresh();
+              },
+            }),
+            onAuto: async () => {
+              await requestQuestionAddition(caseId, questionSet.id, group.key, "AUTO_GROUP", null);
+              await onRefresh();
+            },
+          });
+        }, "secondary question-group-add");
+        addButton.dataset.questionCategory = group.key;
+        addButton.disabled = mutationLocked || Boolean(activeQuestionAddition(caseId, questionSet.id, group.key));
+        groupTitle.append(addButton);
+      }
+      groupSection.append(groupTitle);
+      const additionHost = element("div", undefined, "question-addition-progress");
+      groupSection.append(additionHost);
       for (const question of group.items) {
         const item = button("", () => {
           selectedId = question.id;
@@ -1221,7 +1541,11 @@ function renderQuestionWorkspace(questionSet, caseId, onRefresh, assessmentStart
         item.setAttribute("aria-selected", selectedId === question.id ? "true" : "false");
         item.append(element("span", question.displayOrder + ". " + safeText(question.questionText), "master-item-title"));
         item.append(element("span", categoryLabel(question.questionCategory) + " · " + safeText(question.difficulty), "master-item-meta"));
-        master.append(item);
+        groupSection.append(item);
+      }
+      master.append(groupSection);
+      if (!mutationLocked && ["FOUNDATION", "APPLICATION", "DEEP_DIVE"].includes(group.key)) {
+        loadQuestionAdditionState(additionHost, group.key, questionSet, caseId, async () => onRefresh());
       }
     }
     const selected = questions.find((question) => question.id === selectedId) || questions[0];
@@ -1371,7 +1695,10 @@ async function renderQuestions(caseId) {
       if (questionPolicy.limitations?.length) quality.append(element("p", "Giới hạn: " + questionPolicy.limitations.join("; "), "muted"));
       overview.append(quality);
     }
-    if (item.activeTaskId) await restoreActiveQuestionVariantTask(caseId, questionSet, item.activeTaskId);
+    if (item.activeTaskId) {
+      await restoreActiveQuestionVariantTask(caseId, questionSet, item.activeTaskId);
+      await restoreActiveQuestionAdditionTask(caseId, questionSet, item.activeTaskId);
+    }
     view.append(overview, renderQuestionWorkspace(
       questionSet,
       caseId,

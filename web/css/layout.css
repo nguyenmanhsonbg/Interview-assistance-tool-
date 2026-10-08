@@ -45,7 +45,16 @@
 .detail-row { display: grid; grid-template-columns: minmax(120px, .35fr) minmax(0, 1fr); gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--ui-border); }
 .detail-label { color: var(--ui-muted); font-size: 13px; }
 .question-group { display: grid; gap: 8px; }
-.question-group-title { display: flex; align-items: center; justify-content: space-between; padding-bottom: 6px; border-bottom: 1px solid var(--ui-border); }
+.question-group-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 6px; border-bottom: 1px solid var(--ui-border); }
+.question-group-title h3 { margin: 0; }
+.question-group-count { color: var(--ui-muted); font-size: 12px; }
+.question-group-add { flex: none; min-height: 34px; padding: 7px 12px; }
+.question-addition-progress { display: grid; gap: 10px; }
+.question-addition-choice .modal { width: min(440px, 100%); }
+.question-addition-proposal { border-color: var(--ui-primary); background: var(--ui-primary-soft); }
+.question-addition-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.question-addition-status h3 { margin: 0; }
+.question-addition-fields { display: grid; gap: 0; padding-top: 4px; border-top: 1px solid var(--ui-border); }
 .question-grid { display: grid; gap: 16px; }
 .rubric { border-top: 1px solid var(--ui-border); }
 .rubric summary { cursor: pointer; padding: 12px 0; color: var(--ui-primary); font-weight: 600; }

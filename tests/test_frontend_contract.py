@@ -206,6 +206,44 @@ class FrontendContractTests(unittest.TestCase):
         self.assertNotIn("Sửa bằng tay", scripts)
         self.assertNotIn("Lưu chỉnh sửa", scripts)
 
+    def test_question_addition_workflow_uses_group_actions_and_proposal_first_flow(self):
+        root = Path(__file__).resolve().parents[1] / "web"
+        styles = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.css"))
+        scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
+
+        for marker in (
+            "function openQuestionAdditionChoice(groupKey",
+            "function openQuestionAdditionPrompt(groupKey",
+            "function requestQuestionAddition(caseId, questionSetId, groupKey, mode, prompt)",
+            "function renderQuestionAdditionProposal",
+            "/question-additions",
+            "QUESTION_ADDITION_OPERATION",
+            '"AUTO_GROUP"',
+            '"FOUNDATION"',
+            '"APPLICATION"',
+            '"DEEP_DIVE"',
+            "question-addition-prompt",
+            "question-addition-choice",
+            "question-addition-proposal",
+            "additionProposalId",
+            "expectedQuestionSetUpdatedAt",
+            "expectedSourceFingerprint",
+            "ThÃªm cÃ¢u há»i",
+            "questionCategory",
+            "MAX_ADDITION_PROMPT_CHARS",
+        ):
+            self.assertIn(marker, scripts)
+        for marker in (
+            "question-group-title",
+            "question-group-add",
+            "question-addition-choice",
+            "question-addition-proposal",
+            "question-addition-progress",
+        ):
+            self.assertIn(marker, styles + scripts)
+        self.assertIn('questionSet.status === "APPROVED" || assessmentStarted', scripts)
+        self.assertNotIn("Sá»­a báº±ng tay", scripts)
+
     def test_questions_workspace_restores_selected_question_after_refresh(self):
         root = Path(__file__).resolve().parents[1] / "web"
         scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
