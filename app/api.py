@@ -23,6 +23,7 @@ from app.services.interview_brief_service import InterviewBriefService
 from app.services.interview_service import InterviewService
 from app.services.question_generation_service import QuestionGenerationService
 from app.services.question_service import QuestionService
+from app.services.question_variant_service import QuestionVariantService
 
 
 class APIController:
@@ -52,6 +53,12 @@ class APIController:
         self.excel_assessments = ExcelAssessmentService(database)
         self.html_assessments = HtmlCandidatePackageService(database)
         self.questions = QuestionService(database)
+        self.question_variants = QuestionVariantService(
+            database,
+            schema_root,
+            provider_name=ai_provider_name,
+            model_name=ai_model_name,
+        )
         self.question_generation = QuestionGenerationService(
             database,
             schema_root,
@@ -94,6 +101,10 @@ class APIController:
         router.add("GET", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set", self.get_question_set, **committee)
         router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set", self.generate_question_set, **committee)
         router.add("PATCH", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set", self.update_question_set, **committee)
+        router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set/questions/(?P<question_id>[^/]+)/variants", self.create_question_variant, **committee)
+        router.add("GET", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set/questions/(?P<question_id>[^/]+)/variants/(?P<variant_id>[^/]+)", self.get_question_variant, **committee)
+        router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set/questions/(?P<question_id>[^/]+)/variants/(?P<variant_id>[^/]+)/discard", self.discard_question_variant, **committee)
+        router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set/questions/(?P<question_id>[^/]+)/variants/(?P<variant_id>[^/]+)/apply", self.apply_question_variant, **committee)
         router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set/approve", self.approve_question_set, **committee)
         router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set/export", self.export_question_set, body_mode="none", **committee)
         router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/candidate-package/export", self.export_candidate_package, body_mode="none", **committee)
@@ -220,6 +231,91 @@ class APIController:
         body = _body(request)
         return _ok(request, {"questionSet": self.questions.update_draft(body.get("questionSetId"), body.get("questions", []))})
 
+    def create_question_variant(self, request: Request) -> Response:
+        body = _body(request)
+        question_set_id = body.get("questionSetId")
+        mode = body.get("mode")
+        if not isinstance(question_set_id, str) or not question_set_id.strip():
+            raise ValidationError("questionSetId is required")
+        task = self.question_variants.request_variant(
+            request.path_params["case_id"],
+            question_set_id,
+            request.path_params["question_id"],
+            mode,
+            body.get("prompt"),
+            _idempotency(request, "question-variant"),
+        )
+        self.submit_task(task["id"])
+        return _ok(
+            request,
+            {
+                "taskId": task["id"],
+                "status": task["status"],
+                "questionSetId": question_set_id,
+                "questionId": request.path_params["question_id"],
+                "sourceQuestionId": task.get("sourceQuestionId"),
+            },
+            status=202,
+        )
+
+    def get_question_variant(self, request: Request) -> Response:
+        proposal = self.question_variants.get_proposal(
+            request.path_params["case_id"],
+            request.query.get("questionSetId", [None])[0]
+            or self.question_variants.get_proposal_by_id(
+                request.path_params["case_id"],
+                request.path_params["question_id"],
+                request.path_params["variant_id"],
+            )["questionSetId"],
+            request.path_params["question_id"],
+            request.path_params["variant_id"],
+        )
+        return _ok(request, proposal)
+
+    def discard_question_variant(self, request: Request) -> Response:
+        question_set_id = self.question_variants.get_proposal_by_id(
+            request.path_params["case_id"],
+            request.path_params["question_id"],
+            request.path_params["variant_id"],
+        )["questionSetId"]
+        proposal = self.question_variants.discard_proposal(
+            request.path_params["case_id"],
+            question_set_id,
+            request.path_params["question_id"],
+            request.path_params["variant_id"],
+        )
+        return _ok(request, proposal)
+
+    def apply_question_variant(self, request: Request) -> Response:
+        body = _body(request)
+        proposal = self.question_variants.get_proposal_by_id(
+            request.path_params["case_id"],
+            request.path_params["question_id"],
+            request.path_params["variant_id"],
+        )
+        question_set_id = body.get("questionSetId") or proposal["questionSetId"]
+        updated_at = body.get("expectedQuestionSetUpdatedAt")
+        fingerprint = body.get("expectedSourceFingerprint")
+        if not isinstance(updated_at, str) or not updated_at.strip():
+            raise ValidationError("expectedQuestionSetUpdatedAt is required")
+        if not isinstance(fingerprint, str) or not fingerprint.strip():
+            raise ValidationError("expectedSourceFingerprint is required")
+        applied = self.question_variants.apply_proposal(
+            request.path_params["case_id"],
+            question_set_id,
+            request.path_params["question_id"],
+            request.path_params["variant_id"],
+            updated_at,
+            fingerprint,
+        )
+        return _ok(request, applied)
+
+    def _question_set_id(self, case_id: str) -> str:
+        question_set = self.questions.get_for_case(case_id)
+        if question_set is None:
+            raise ResourceNotFound("Question Set not found")
+        return question_set["id"]
+
     def approve_question_set(self, request: Request) -> Response:
         body = _body(request)
         if body.get("confirmation") != "APPROVE_QUESTION_SET":
@@ -327,9 +423,17 @@ class APIController:
     def get_task(self, request: Request) -> Response:
         task = self.tasks.get(request.path_params["task_id"])
         result = task.pop("result", None)
-        safe_task = {key: task[key] for key in ("id", "taskType", "status", "phase", "assessmentSnapshotId", "createdAt", "startedAt", "finishedAt", "errorCode")}
+        safe_task = {key: task[key] for key in ("id", "taskType", "status", "phase", "assessmentSnapshotId", "sourceQuestionId", "createdAt", "startedAt", "finishedAt", "errorCode")}
         if safe_task["status"] == "COMPLETED" and safe_task["errorCode"] == "AI_MATERIALIZATION_FAILED":
             safe_task["status"] = "FAILED"
+        variant_proposal_id = None
+        if task["taskType"] == "GENERATE_QUESTION_VARIANT" and result is not None:
+            with self.database.connection() as connection:
+                proposal = connection.execute(
+                    "SELECT id FROM question_variant_proposals WHERE ai_result_id=?",
+                    (result["id"],),
+                ).fetchone()
+            variant_proposal_id = None if proposal is None else proposal["id"]
         if safe_task["status"] == "COMPLETED":
             case_status = (
                 self.evaluations.refined_status(task["interviewCaseId"])
@@ -345,7 +449,12 @@ class APIController:
             if materializing:
                 safe_task["status"] = "RUNNING"
                 safe_task["finishedAt"] = None
+            elif task["taskType"] == "GENERATE_QUESTION_VARIANT" and variant_proposal_id is None:
+                safe_task["status"] = "RUNNING"
+                safe_task["finishedAt"] = None
         safe_result = {"id": None, "resultType": None, "versionNo": None} if result is None else {key: result[key] for key in ("id", "resultType", "versionNo")}
+        if task["taskType"] == "GENERATE_QUESTION_VARIANT" and result is not None:
+            safe_task["proposalId"] = variant_proposal_id
         return _ok(request, {"task": safe_task, "result": safe_result})
 
     def get_brief(self, request: Request) -> Response:

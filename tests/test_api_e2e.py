@@ -12,7 +12,11 @@ from app.infrastructure.excel_question_answer import (
     import_question_answer_workbook,
 )
 from app.infrastructure.html_candidate_package import import_candidate_package
-from tests.ai_fixtures import answer_evaluation_v2_payload, question_generation_payload
+from tests.ai_fixtures import (
+    answer_evaluation_v2_payload,
+    question_generation_payload,
+    question_variant_payload,
+)
 from tests.test_questions import valid_questions
 
 
@@ -55,6 +59,13 @@ class FakePilotProvider:
 
     def generate_questions(self, payload):
         return question_generation_payload()
+
+    def generate_question_variant(self, payload):
+        result = question_variant_payload()
+        result["questionSetId"] = payload["questionSetId"]
+        result["sourceQuestionId"] = payload["sourceQuestionId"]
+        result["mode"] = payload["mode"]
+        return result
 
     def evaluate_answers(self, payload):
         return answer_evaluation_v2_payload(answered=True)
@@ -164,6 +175,102 @@ class PilotE2ETests(unittest.TestCase):
                 return result
             time.sleep(0.02)
         self.fail("AI task did not complete")
+
+    def test_question_variant_api_is_idempotent_and_requires_explicit_apply(self):
+        headers = self.committee_headers()
+        job = self.call("POST", "/api/v1/jobs", {
+            "jobCode": "JOB-VARIANT", "positionTitle": "Backend Engineer", "targetLevel": "Senior",
+        }, headers=headers)["job"]
+        candidate = self.call("POST", "/api/v1/candidates", {
+            "candidateCode": "CAND-VARIANT", "fullName": "Variant Candidate",
+        }, headers=headers)["candidate"]
+        case = self.call("POST", "/api/v1/interview-cases", {
+            "candidateId": candidate["id"], "jobId": job["id"],
+            "committeeMembers": [{"displayName": "Lead", "role": "LEAD"}],
+        }, headers=headers)["case"]
+        with self.application.database.transaction() as connection:
+            connection.execute(
+                "UPDATE interview_cases SET status='DOCUMENTS_READY' WHERE id=?",
+                (case["id"],),
+            )
+        question_set = self.call(
+            "POST", f"/api/v1/interview-cases/{case['id']}/question-set",
+            {"operation": "MANUAL", "questions": valid_questions()}, headers=headers,
+        )["questionSet"]
+        question_id = question_set["questions"][0]["id"]
+        variant_path = (
+            f"/api/v1/interview-cases/{case['id']}/question-set/questions/"
+            f"{question_id}/variants"
+        )
+        create_body = {
+            "questionSetId": question_set["id"],
+            "mode": "USER_PROMPT",
+            "prompt": "Tập trung vào trade-off",
+        }
+        created = self.call(
+            "POST", variant_path, create_body,
+            headers={**headers, "X-Idempotency-Key": "variant-http-key"},
+        )
+        repeated = self.call(
+            "POST", variant_path, create_body,
+            headers={**headers, "X-Idempotency-Key": "variant-http-key"},
+        )
+        self.assertEqual(created["taskId"], repeated["taskId"])
+
+        task = self.wait_task(created["taskId"])
+        with self.application.database.connection() as connection:
+            proposal_row = connection.execute(
+                "SELECT id FROM question_variant_proposals WHERE source_question_id=?",
+                (question_id,),
+            ).fetchone()
+        self.assertIsNotNone(proposal_row, task)
+        proposal_id = proposal_row[0]
+        proposal_path = f"{variant_path}/{proposal_id}"
+        proposal = self.call("GET", proposal_path, headers=self.committee_headers(False))
+        self.assertEqual("PROPOSED", proposal["status"])
+        self.assertNotIn("payloadJson", proposal)
+        self.assertNotIn("rawPayload", proposal)
+
+        refreshed = self.call(
+            "GET", f"/api/v1/interview-cases/{case['id']}/question-set",
+            headers=self.committee_headers(False),
+        )["questionSet"]
+        applied = self.call(
+            "POST", f"{proposal_path}/apply",
+            {
+                "expectedQuestionSetUpdatedAt": refreshed["updatedAt"],
+                "expectedSourceFingerprint": proposal["sourceFingerprint"],
+            },
+            headers=headers,
+        )
+        self.assertEqual("APPLIED", applied["proposal"]["status"])
+        self.assertEqual(question_id, applied["question"]["id"])
+
+    def test_question_variant_api_rejects_invalid_prompt_and_missing_committee(self):
+        headers = self.committee_headers()
+        path = "/api/v1/interview-cases/missing/question-set/questions/missing/variants"
+        self.assertEqual(401, self.error_status("POST", path, {"mode": "SAME_GROUP"}))
+        self.assertEqual(
+            422,
+            self.error_status(
+                "POST", path,
+                {"questionSetId": "missing", "mode": "USER_PROMPT", "prompt": " "}, headers=headers,
+            ),
+        )
+        self.assertEqual(
+            422,
+            self.error_status(
+                "POST", path,
+                {"questionSetId": "missing", "mode": "USER_PROMPT", "prompt": "x" * 2001}, headers=headers,
+            ),
+        )
+        self.assertEqual(
+            422,
+            self.error_status(
+                "POST", path,
+                {"questionSetId": "missing", "mode": "SAME_GROUP", "prompt": "not allowed"}, headers=headers,
+            ),
+        )
 
     def test_complete_excel_question_answer_evaluation_flow_over_http(self):
         headers = self.committee_headers()
