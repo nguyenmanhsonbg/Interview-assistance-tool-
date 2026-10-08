@@ -163,6 +163,34 @@ class FrontendContractTests(unittest.TestCase):
             self.assertIn(marker, scripts)
         self.assertLess(scripts.index("empty.append(taskHost);"), scripts.index("if (!taskRunning) {"))
 
+    def test_case_creation_uses_jd_derived_level_and_questions_wait_for_readiness(self):
+        root = Path(__file__).resolve().parents[1] / "web"
+        scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
+
+        self.assertNotIn('field("Level", "targetLevel"', scripts)
+        self.assertNotIn("values.targetLevel", scripts)
+        self.assertNotIn("targetLevel: values", scripts)
+        self.assertIn('targetLevelStatus === "READY"', scripts)
+        self.assertIn("Cần xác định level từ JD trước khi tạo Question Set.", scripts)
+
+    def test_jd_level_extraction_ui_has_status_progress_and_retry(self):
+        root = Path(__file__).resolve().parents[1] / "web"
+        styles = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.css"))
+        scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
+
+        for marker in (
+            "targetLevelStatus",
+            "Đang xác định level từ JD",
+            "Xác định level từ JD thất bại",
+            "/job-level/extract",
+            "retry: true",
+            'resumeTask(caseId, "documents"',
+            "job-level-status",
+        ):
+            self.assertIn(marker, styles + scripts)
+        self.assertIn("targetLevel", scripts)
+        self.assertIn("targetLevelConfidence", scripts)
+
     def test_questions_screen_removes_legacy_copy_and_excel_button(self):
         root = Path(__file__).resolve().parents[1] / "web"
         scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))

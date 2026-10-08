@@ -332,6 +332,13 @@ function caseStepComplete(status, key) {
   return status === "AI_EVALUATED";
 }
 
+function jobLevelLabel(job) {
+  if (job?.targetLevelStatus === "READY") return safeText(job.targetLevel, "Đã xác định từ JD");
+  if (job?.targetLevelStatus === "EXTRACTING") return "Đang xác định level từ JD";
+  if (job?.targetLevelStatus === "FAILED") return "Chưa xác định level từ JD";
+  return "Level lấy từ JD";
+}
+
 function renderCaseStepper(item, activeStep, step) {
   const status = item.refinedFlowStatus || item.status;
   return {
@@ -350,7 +357,7 @@ function renderCaseHeader(item, activeStep) {
   meta.append(
     element("span", safeText(item.candidate?.candidateCode)),
     element("span", safeText(item.job?.positionTitle)),
-    element("span", safeText(item.job?.targetLevel)),
+    element("span", jobLevelLabel(item.job)),
     element("span", "Lead HĐCM: " + safeText(lead?.displayName, "Chưa có")),
   );
   identity.append(meta);
@@ -447,7 +454,7 @@ async function renderCasesWithStatus(statusValue = "", host = null, revision = r
       const candidateCell = document.createElement("td");
       candidateCell.append(caseLink, element("div", safeText(item.candidate?.candidateCode), "muted"));
       const positionCell = element("td", safeText(item.job?.positionTitle));
-      positionCell.append(element("div", safeText(item.job?.targetLevel), "muted"));
+      positionCell.append(element("div", jobLevelLabel(item.job), "muted"));
       const workflow = item.refinedFlowStatus || item.status;
       const statusCell = document.createElement("td");
       statusCell.append(statusBadge(workflow));
@@ -501,7 +508,6 @@ async function renderNewCase() {
     candidateCode,
     field("Tên ứng viên", "fullName", { required: true }),
     field("Vị trí", "positionTitle", { required: true }),
-    field("Level", "targetLevel", { required: true }),
     field("Tên Lead HĐCM", "leadName", { required: true }),
   ];
   const grid = element("div", undefined, "field-grid");
@@ -517,11 +523,11 @@ async function renderNewCase() {
 
   formSubmit(form, async () => {
     const values = Object.fromEntries(fields.map((item) => [item.input.name, item.input.value.trim()]));
-    const draftKey = [values.candidateCode, values.positionTitle, values.targetLevel].join("|");
+    const draftKey = [values.candidateCode, values.positionTitle].join("|");
     const cached = pendingCaseCreation?.key === draftKey ? pendingCaseCreation : null;
     const job = cached?.job || (await apiFetch("/api/v1/jobs", {
       method: "POST",
-      body: JSON.stringify({ positionTitle: values.positionTitle, targetLevel: values.targetLevel }),
+      body: JSON.stringify({ positionTitle: values.positionTitle }),
     })).job;
     pendingCaseCreation = { key: draftKey, job };
     const candidate = cached?.candidate || await findOrCreate(
@@ -725,12 +731,57 @@ function buildDocumentCard(caseId, type, current) {
   return card;
 }
 
+function renderJobLevelStatus(caseId, item) {
+  const job = item.job || {};
+  const status = job.targetLevelStatus || "PENDING";
+  const panel = element("section", undefined, "job-level-status notice stack");
+  const heading = element("div", undefined, "actions");
+  heading.append(element("strong", "Level từ JD"));
+
+  if (status === "READY") {
+    heading.append(element("span", safeText(job.targetLevel), "badge success"));
+    if (job.targetLevelConfidence !== null && job.targetLevelConfidence !== undefined) {
+      heading.append(element("span", "Độ tin cậy " + formatConfidence(job.targetLevelConfidence), "badge"));
+    }
+    panel.append(heading, element("p", "Level được lấy từ nội dung JD đã xác nhận.", "muted"));
+    return panel;
+  }
+
+  if (status === "EXTRACTING") {
+    heading.append(element("span", "Đang xác định level từ JD", "badge warning"));
+    panel.append(heading, element("p", "AI đang đọc JD để xác định level. Có thể tiếp tục theo dõi tại đây.", "muted"));
+    const taskHost = element("div", undefined, "stack");
+    panel.append(taskHost);
+    if (item.activeTaskId) {
+      resumeTask(caseId, "documents", item.activeTaskId, taskHost, () => renderDocuments(caseId), "AI đang xác định level từ JD");
+    }
+    return panel;
+  }
+
+  if (status === "FAILED") {
+    heading.append(element("span", "Xác định level từ JD thất bại", "badge danger"));
+    const retry = button("Thử lại xác định level", async () => {
+      await apiFetch("/api/v1/interview-cases/" + encodeURIComponent(caseId) + "/job-level/extract", {
+        method: "POST",
+        body: JSON.stringify({ retry: true }),
+      });
+      await renderDocuments(caseId);
+    }, "secondary");
+    panel.append(heading, element("p", "Không thể xác định level từ JD hiện tại. Hãy kiểm tra nội dung JD rồi thử lại.", "muted"), retry);
+    return panel;
+  }
+
+  panel.append(heading, element("p", "Level sẽ được lấy từ JD sau khi JD được xác nhận.", "muted"));
+  return panel;
+}
+
 async function renderDocuments(caseId) {
   await renderCasePage(caseId, "documents", async (item) => {
     const data = await apiFetch("/api/v1/interview-cases/" + encodeURIComponent(caseId) + "/documents");
     const current = (type) => data.items?.find((document) => document.documentType === type && document.isCurrent);
     const view = element("div", undefined, "stack");
     view.append(element("div", "Chỉ tài liệu hiện hành đã xác nhận mới được dùng để sinh câu hỏi.", "notice"));
+    view.append(renderJobLevelStatus(caseId, item));
     const grid = element("div", undefined, "content-grid");
     grid.append(buildDocumentCard(caseId, "JD", current("JD")), buildDocumentCard(caseId, "CV", current("CV")));
     view.append(grid);
@@ -1739,14 +1790,19 @@ async function renderQuestions(caseId) {
         if (!isActiveCaseStep(caseId, "questions")) return;
         await renderQuestions(caseId);
       }, "primary");
-      const canGenerate = ["DOCUMENTS_READY", "QUESTION_GENERATION_FAILED"].includes(item.refinedFlowStatus);
+      const levelReady = item.job?.targetLevelStatus === "READY";
+      const canGenerate = levelReady && ["DOCUMENTS_READY", "QUESTION_GENERATION_FAILED"].includes(item.refinedFlowStatus);
       generate.disabled = !canGenerate;
       const manual = button("Tạo bản nháp thủ công", () => renderManualDraft(caseId), "secondary");
       manual.disabled = !canGenerate;
       empty.append(taskHost);
       if (!taskRunning) {
         empty.append(generate, manual);
-        if (!canGenerate) empty.append(element("p", "Cần xác nhận đủ JD và CV trước khi tạo Question Set.", "muted"));
+        if (!levelReady) {
+          empty.append(element("p", "Cần xác định level từ JD trước khi tạo Question Set.", "muted"));
+        } else if (!canGenerate) {
+          empty.append(element("p", "Cần xác nhận đủ JD và CV trước khi tạo Question Set.", "muted"));
+        }
       }
       view.append(empty);
       return view;
