@@ -38,7 +38,8 @@ class QuestionGenerationService:
     ) -> dict[str, Any]:
         with self.database.connection() as connection:
             case = connection.execute(
-                """SELECT ic.status, j.id job_id, j.updated_at job_updated_at
+                """SELECT ic.status, j.id job_id, j.updated_at job_updated_at,
+                          j.target_level_status
                    FROM interview_cases ic JOIN jobs j ON j.id=ic.job_id
                    WHERE ic.id=?""", (case_id,),
             ).fetchone()
@@ -51,6 +52,8 @@ class QuestionGenerationService:
             ).fetchall()
         if case["status"] not in {"DOCUMENTS_READY", "QUESTION_GENERATION_FAILED"}:
             raise StateConflict("Case is not ready for question generation")
+        if case["target_level_status"] != "READY":
+            raise StateConflict("Job level is not ready")
         if {row["document_type"] for row in documents} != {"JD", "CV"}:
             raise StateConflict("Confirmed current JD and CV are required")
         manifest = {

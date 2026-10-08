@@ -58,8 +58,27 @@ class FakePilotProvider:
         self.block_evidence = False
         self.evidence_started = threading.Event()
         self.release_evidence = threading.Event()
+        self.block_level = False
+        self.level_started = threading.Event()
+        self.release_level = threading.Event()
+        self.level_failure = False
         self.variant_invalid = False
         self.variant_failure = False
+
+    def extract_job_level(self, payload):
+        self.level_started.set()
+        if self.block_level:
+            self.release_level.wait(2)
+        if self.level_failure:
+            from app.ai.provider import ProviderError
+
+            raise ProviderError("level provider failed", code="AI_LEVEL_FAILED", retryable=False)
+        return {
+            "schemaVersion": "job-level-extraction.v1",
+            "targetLevel": "Senior",
+            "confidence": 0.92,
+            "evidence": ["Senior backend role"],
+        }
 
     def generate_questions(self, payload):
         return question_generation_payload()
@@ -224,6 +243,119 @@ class PilotE2ETests(unittest.TestCase):
             {"operation": "MANUAL", "questions": valid_questions()}, headers=headers,
         )["questionSet"]
         return case, question_set
+
+    def create_pending_case(self, job_code, candidate_code):
+        headers = self.committee_headers()
+        job = self.call("POST", "/api/v1/jobs", {
+            "jobCode": job_code, "positionTitle": "Backend Engineer",
+        }, headers=headers)["job"]
+        candidate = self.call("POST", "/api/v1/candidates", {
+            "candidateCode": candidate_code, "fullName": "Pending Candidate",
+        }, headers=headers)["candidate"]
+        case = self.call("POST", "/api/v1/interview-cases", {
+            "candidateId": candidate["id"], "jobId": job["id"],
+            "committeeMembers": [{"displayName": "Lead", "role": "LEAD"}],
+        }, headers=headers)["case"]
+        return job, case
+
+    def test_new_job_without_level_extracts_after_jd_confirmation(self):
+        job, case = self.create_pending_case("JOB-LEVEL-API", "CAND-LEVEL-API")
+        self.assertIsNone(job["targetLevel"])
+        self.assertEqual("PENDING", job["targetLevelStatus"])
+
+        document = self.call(
+            "POST", f"/api/v1/interview-cases/{case['id']}/documents",
+            {"documentType": "JD", "sourceKind": "MANUAL_TEXT", "text": "Senior backend role"},
+            headers=self.committee_headers(),
+        )["document"]
+        confirmation = self.call(
+            "POST",
+            f"/api/v1/interview-cases/{case['id']}/documents/{document['id']}/confirm",
+            {"confirmed": True, "textSha256": document["contentSha256"]},
+            headers=self.committee_headers(),
+        )
+        task_id = confirmation["levelTask"]["id"]
+        completed = self.wait_task(task_id)
+        self.assertEqual("COMPLETED", completed["task"]["status"])
+
+        current = self.call(
+            "GET", f"/api/v1/interview-cases/{case['id']}",
+            headers=self.committee_headers(False),
+        )["case"]
+        self.assertEqual("Senior", current["job"]["targetLevel"])
+        self.assertEqual("READY", current["job"]["targetLevelStatus"])
+
+        duplicate = self.call(
+            "POST",
+            f"/api/v1/interview-cases/{case['id']}/documents/{document['id']}/confirm",
+            {"confirmed": True, "textSha256": document["contentSha256"]},
+            headers=self.committee_headers(),
+        )
+        self.assertEqual(task_id, duplicate["levelTask"]["id"])
+
+    def test_job_level_retry_requires_terminal_task_and_mutable_case(self):
+        self.provider.block_level = True
+        job, case = self.create_pending_case("JOB-LEVEL-RETRY", "CAND-LEVEL-RETRY")
+        document = self.call(
+            "POST", f"/api/v1/interview-cases/{case['id']}/documents",
+            {"documentType": "JD", "sourceKind": "MANUAL_TEXT", "text": "Senior backend role"},
+            headers=self.committee_headers(),
+        )["document"]
+        confirm_path = f"/api/v1/interview-cases/{case['id']}/documents/{document['id']}/confirm"
+        confirmation = self.call(
+            "POST", confirm_path,
+            {"confirmed": True, "textSha256": document["contentSha256"]},
+            headers=self.committee_headers(),
+        )
+        self.assertTrue(self.provider.level_started.wait(2))
+        retry_path = f"/api/v1/interview-cases/{case['id']}/job-level/extract"
+        self.assertEqual(
+            409,
+            self.error_status(
+                "POST", retry_path, {"retry": True}, headers=self.committee_headers()
+            ),
+        )
+        self.provider.release_level.set()
+        self.wait_task(confirmation["levelTask"]["id"])
+
+        self.provider.level_failure = True
+        replacement_job, replacement_case = self.create_pending_case(
+            "JOB-LEVEL-RETRY-FAILED", "CAND-LEVEL-RETRY-FAILED"
+        )
+        replacement = self.call(
+            "POST", f"/api/v1/interview-cases/{replacement_case['id']}/documents",
+            {"documentType": "JD", "sourceKind": "MANUAL_TEXT", "text": "Senior backend role"},
+            headers=self.committee_headers(),
+        )["document"]
+        failed_confirmation = self.call(
+            "POST",
+            f"/api/v1/interview-cases/{replacement_case['id']}/documents/{replacement['id']}/confirm",
+            {"confirmed": True, "textSha256": replacement["contentSha256"]},
+            headers=self.committee_headers(),
+        )
+        failed = self.wait_task_terminal(failed_confirmation["levelTask"]["id"])
+        self.assertEqual("FAILED", failed["task"]["status"])
+
+        self.provider.level_failure = False
+        retry = self.call(
+            "POST", f"/api/v1/interview-cases/{replacement_case['id']}/job-level/extract",
+            {"retry": True}, headers=self.committee_headers(),
+        )
+        self.assertNotEqual(failed_confirmation["levelTask"]["id"], retry["taskId"])
+        self.wait_task(retry["taskId"])
+
+        with self.application.database.transaction() as connection:
+            connection.execute(
+                "UPDATE interview_cases SET status='ASSESSMENT_IN_PROGRESS' WHERE id=?",
+                (replacement_case["id"],),
+            )
+        self.assertEqual(
+            409,
+            self.error_status(
+                "POST", f"/api/v1/interview-cases/{replacement_case['id']}/job-level/extract",
+                {"retry": True}, headers=self.committee_headers(),
+            ),
+        )
 
     def approve_question_set(self, case_id, question_set_id):
         member_id = self.call(

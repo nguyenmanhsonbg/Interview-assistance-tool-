@@ -112,6 +112,7 @@ class APIController:
         router.add("GET", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/documents", self.list_documents, **committee)
         router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/documents", self.import_document, max_body=10 * 1024 * 1024, **committee)
         router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/documents/(?P<document_id>[^/]+)/confirm", self.confirm_document, **committee)
+        router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/job-level/extract", self.extract_job_level, **committee)
         router.add("GET", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set", self.get_question_set, **committee)
         router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set", self.generate_question_set, **committee)
         router.add("PATCH", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set", self.update_question_set, **committee)
@@ -239,6 +240,24 @@ class APIController:
                 "id": level_task["id"], "status": level_task["status"]
             }
         return _ok(request, data)
+
+    def extract_job_level(self, request: Request) -> Response:
+        body = _body(request)
+        task = self.job_levels.request_for_confirmed_jd(
+            request.path_params["case_id"], retry=body.get("retry") is True
+        )
+        if task is None:
+            return _ok(
+                request,
+                {"taskId": None, "status": "READY", "jobLevelStatus": "READY"},
+            )
+        if task["status"] in {"PENDING", "PENDING_RETRY"}:
+            self.submit_task(task["id"])
+        return _ok(
+            request,
+            {"taskId": task["id"], "status": task["status"]},
+            status=202 if task["status"] in {"PENDING", "PENDING_RETRY", "RUNNING"} else 200,
+        )
 
     def get_question_set(self, request: Request) -> Response:
         question_set = self.questions.get_for_case(request.path_params["case_id"])
@@ -570,16 +589,20 @@ class APIController:
                 ).fetchone()
             addition_proposal_id = None if proposal is None else proposal["id"]
         if safe_task["status"] == "COMPLETED":
+            case_view = self.cases.get_case(task["interviewCaseId"])
             case_status = (
                 self.evaluations.refined_status(task["interviewCaseId"])
                 if task.get("assessmentSnapshotId")
-                else self.cases.get_case(task["interviewCaseId"])["status"]
+                else case_view["status"]
             )
             materializing = (
                 task["taskType"] == "GENERATE_QUESTIONS" and case_status == "QUESTIONS_GENERATING"
             ) or (
                 task["taskType"] in {"EVALUATE_ASSESSMENT", "GENERATE_BRIEF"}
                 and case_status == "AI_ANALYZING"
+            ) or (
+                task["taskType"] == "EXTRACT_JOB_LEVEL"
+                and case_view["job"].get("targetLevelStatus") == "EXTRACTING"
             )
             if materializing:
                 safe_task["status"] = "RUNNING"

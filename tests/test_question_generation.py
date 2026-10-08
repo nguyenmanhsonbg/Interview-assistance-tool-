@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 from tests.support import MigratedDatabaseFixture
 
@@ -85,6 +86,29 @@ class QuestionGenerationTests(MigratedDatabaseFixture, unittest.TestCase):
             QuestionService(self.database).materialize_generated(self.case["id"], invalid)
         with self.database.connection() as connection:
             count = connection.execute("SELECT COUNT(*) FROM question_sets").fetchone()[0]
+        self.assertEqual(0, count)
+
+    def test_request_rejects_job_level_not_ready_before_creating_task(self):
+        from app.domain.errors import StateConflict
+        from app.services.question_generation_service import QuestionGenerationService
+
+        with self.database.transaction() as connection:
+            connection.execute(
+                "UPDATE jobs SET target_level=NULL, target_level_status='PENDING', target_level_source=NULL WHERE id=?",
+                (self.case["jobId"],),
+            )
+            connection.execute(
+                "UPDATE interview_cases SET status='DOCUMENTS_READY' WHERE id=?",
+                (self.case["id"],),
+            )
+
+        service = QuestionGenerationService(
+            self.database, Path(__file__).resolve().parents[1] / "schemas"
+        )
+        with self.assertRaisesRegex(StateConflict, "Job level is not ready"):
+            service.request(self.case["id"], idempotency_key="blocked-level")
+        with self.database.connection() as connection:
+            count = connection.execute("SELECT COUNT(*) FROM ai_tasks").fetchone()[0]
         self.assertEqual(0, count)
 
 

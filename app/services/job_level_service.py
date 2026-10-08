@@ -66,6 +66,8 @@ class JobLevelService:
             )
             if existing is not None:
                 if existing["status"] in {"PENDING", "PENDING_RETRY", "RUNNING", "COMPLETED"}:
+                    if retry and existing["status"] != "FAILED":
+                        raise StateConflict("Job level extraction is not retryable")
                     return existing
                 if not retry:
                     return existing

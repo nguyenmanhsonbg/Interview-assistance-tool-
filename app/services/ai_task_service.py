@@ -50,7 +50,9 @@ class AITaskService:
         task_id = str(uuid.uuid4())
         with self.database.transaction() as connection:
             case = connection.execute(
-                "SELECT status, job_id FROM interview_cases WHERE id=?", (case_id,)
+                """SELECT ic.status, ic.job_id, j.target_level_status
+                   FROM interview_cases ic JOIN jobs j ON j.id=ic.job_id
+                   WHERE ic.id=?""", (case_id,)
             ).fetchone()
             if case is None:
                 raise ResourceNotFound("Interview case not found")
@@ -73,6 +75,8 @@ class AITaskService:
             if task_type == "GENERATE_QUESTIONS":
                 if case["status"] not in {"DOCUMENTS_READY", "QUESTION_GENERATION_FAILED"}:
                     raise StateConflict("Case is not ready for question generation")
+                if case["target_level_status"] != "READY":
+                    raise StateConflict("Job level is not ready")
                 connection.execute("UPDATE interview_cases SET status='QUESTIONS_GENERATING', updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?", (case_id,))
             self.repository.insert(connection, task_id=task_id, case_id=case_id,
                 assessment_attempt_id=assessment_attempt_id,
