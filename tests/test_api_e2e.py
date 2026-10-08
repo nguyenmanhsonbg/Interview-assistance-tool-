@@ -311,6 +311,15 @@ class PilotE2ETests(unittest.TestCase):
         )
         self.assertEqual("DISCARDED", discarded["status"])
 
+        self.approve_question_set(case["id"], question_set["id"])
+        status, _, content = self.call_binary(
+            "POST",
+            f"/api/v1/interview-cases/{case['id']}/candidate-package/export",
+            headers=self.committee_headers(),
+        )
+        self.assertEqual(200, status)
+        self.assertEqual(10, len(import_candidate_package(content).questions))
+
         self.assertEqual(
             401,
             self.error_status("POST", base, {

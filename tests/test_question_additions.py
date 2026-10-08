@@ -226,6 +226,25 @@ class QuestionAdditionTests(MigratedDatabaseFixture, unittest.TestCase):
             [tuple(row) for row in rows],
         )
 
+    def test_auto_group_preserves_category_and_source_kind_mapping(self):
+        service = self.make_service()
+        expected_sources = {
+            "FOUNDATION": {"STANDARDIZED"},
+            "APPLICATION": {"SITUATIONAL"},
+            "DEEP_DIVE": {"CV_VERIFICATION", "GAP_CONFLICT"},
+        }
+        for index, category in enumerate(("FOUNDATION", "APPLICATION", "DEEP_DIVE"), start=1):
+            task = service.request_addition(
+                self.case["id"], "set-1", category, "AUTO_GROUP", None,
+                f"auto-category-{index}",
+            )
+            result = service.process(
+                task["id"],
+                AdditionProvider(result=question_addition_payload(category)),
+            )
+            self.assertEqual(category, result["proposal"]["targetCategory"])
+            self.assertIn(result["proposal"]["question"]["sourceKind"], expected_sources[category])
+
     def test_apply_appends_question_and_preserves_existing_questions(self):
         from app.repositories.questions import QuestionRepository
 
