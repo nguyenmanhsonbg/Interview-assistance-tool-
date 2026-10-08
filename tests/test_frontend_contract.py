@@ -231,6 +231,8 @@ class FrontendContractTests(unittest.TestCase):
             "ThÃªm cÃ¢u há»i",
             "questionCategory",
             "MAX_ADDITION_PROMPT_CHARS",
+            "onFailed",
+            "clearActiveQuestionAddition(caseId, questionSet.id, groupKey)",
         ):
             self.assertIn(marker, scripts)
         for marker in (

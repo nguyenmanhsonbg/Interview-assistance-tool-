@@ -814,7 +814,7 @@ async function waitForTask(taskId, host, label = "Tác vụ AI") {
   return promise;
 }
 
-function resumeTask(caseId, step, taskId, host, refresh, label = "Tác vụ AI", onCompleted = null) {
+function resumeTask(caseId, step, taskId, host, refresh, label = "Tác vụ AI", onCompleted = null, onFailed = null) {
   window.setTimeout(() => {
     waitForTask(taskId, host, label)
       .then((result) => {
@@ -822,8 +822,13 @@ function resumeTask(caseId, step, taskId, host, refresh, label = "Tác vụ AI",
         if (result && isActiveCaseStep(caseId, step)) return refresh();
         return null;
       })
-      .catch((error) => {
-        if (isActiveCaseStep(caseId, step)) showError(error, host);
+      .catch(async (error) => {
+        if (!isActiveCaseStep(caseId, step)) return;
+        if (onFailed) {
+          await onFailed(error);
+          return;
+        }
+        showError(error, host);
       });
   }, 0);
 }
@@ -1127,6 +1132,11 @@ function loadQuestionAdditionState(host, groupKey, questionSet, caseId, onRefres
       (result) => {
         const proposalId = result?.task?.additionProposalId;
         if (proposalId) setState({ activeQuestionAddition: { ...state, taskId: null, proposalId } });
+      },
+      async (error) => {
+        clearActiveQuestionAddition(caseId, questionSet.id, groupKey);
+        await onRefresh();
+        showError(error);
       },
     );
     return;
