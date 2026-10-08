@@ -431,6 +431,12 @@ Một task hoàn tất khi:
 
 After Question Set approval and before AI evaluation, implement the offline transfer tasks below. The existing server-side Candidate Mode/autosave/submit tasks remain a separately supported alternative capability and must not be mixed into the HTML package contract.
 
+### Addendum 2026-10-08 — Question addition generation
+
+Trước approval, bổ sung task pipeline `GENERATE_QUESTION_ADDITION` và proposal repository/API/UI
+cho ba group. Apply phải append câu mới trong transaction, mở rộng Question Set tối đa 30 câu,
+và cập nhật candidate HTML contract; không mở rộng Excel fallback.
+
 | Task | Scope | Exit evidence |
 | --- | --- | --- |
 | HTML-001 | Candidate-safe `candidate-html.v1` codec/runtime | file:// package works offline; no external resource; safe text rendering |

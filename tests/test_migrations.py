@@ -21,7 +21,7 @@ class MigrationTests(unittest.TestCase):
         from app.migrations import MigrationRunner
 
         runner = MigrationRunner(self.database, self.migrations)
-        self.assertEqual([1, 2, 3, 4, 5, 6, 7, 8], runner.apply_all())
+        self.assertEqual([1, 2, 3, 4, 5, 6, 7, 8, 9], runner.apply_all())
         self.assertEqual([], runner.apply_all())
 
         with self.database.connection() as connection:
@@ -44,13 +44,69 @@ class MigrationTests(unittest.TestCase):
                 "SELECT version FROM schema_migrations ORDER BY version"
             ).fetchall()
 
-        self.assertEqual(21, len(tables))
+        self.assertEqual(22, len(tables))
         self.assertIn("interview_briefs", tables)
         self.assertEqual(3, len(triggers))
         self.assertEqual("9", settings["assessment.default_question_count"])
-        self.assertEqual("9", settings["assessment.max_question_count"])
+        self.assertEqual("30", settings["assessment.max_question_count"])
         self.assertEqual("MANUAL_ONLY", settings["retention.mode"])
-        self.assertEqual([1, 2, 3, 4, 5, 6, 7, 8], [row[0] for row in versions])
+        self.assertEqual([1, 2, 3, 4, 5, 6, 7, 8, 9], [row[0] for row in versions])
+
+    def test_question_addition_migration_adds_scoped_ai_contract_and_proposals(self):
+        from app.migrations import MigrationRunner
+
+        runner = MigrationRunner(self.database, self.migrations)
+        self.assertEqual([1, 2, 3, 4, 5, 6, 7, 8, 9], runner.apply_all())
+        with self.database.transaction() as connection:
+            connection.execute(
+                "INSERT INTO jobs(id, position_title, target_level) VALUES ('j', 'Role', 'L1')"
+            )
+            connection.execute(
+                "INSERT INTO candidates(id, candidate_code, full_name) VALUES ('c', 'C1', 'Candidate')"
+            )
+            connection.execute(
+                "INSERT INTO interview_cases(id, candidate_id, job_id) VALUES ('case', 'c', 'j')"
+            )
+            connection.execute(
+                "INSERT INTO question_sets(id, interview_case_id) VALUES ('set', 'case')"
+            )
+            connection.execute(
+                """INSERT INTO ai_tasks(
+                    id, interview_case_id, task_type, idempotency_key,
+                    input_fingerprint, target_question_category
+                ) VALUES ('task', 'case', 'GENERATE_QUESTION_ADDITION', 'idem', ?, 'APPLICATION')""",
+                ("a" * 64,),
+            )
+            connection.execute(
+                """INSERT INTO ai_results(
+                    id, ai_task_id, interview_case_id, question_set_id,
+                    target_question_category, result_type, payload_json
+                ) VALUES ('result', 'task', 'case', 'set', 'APPLICATION',
+                    'QUESTION_ADDITION', '{}')"""
+            )
+            connection.execute(
+                """INSERT INTO question_addition_proposals(
+                    id, ai_result_id, interview_case_id, question_set_id,
+                    target_category, mode, source_fingerprint, status
+                ) VALUES ('proposal', 'result', 'case', 'set', 'APPLICATION',
+                    'AUTO_GROUP', ?, 'PROPOSED')""",
+                ("b" * 64,),
+            )
+
+        self.assertEqual([], runner.apply_all())
+        with self.database.connection() as connection:
+            task_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(ai_tasks)")
+            }
+            result_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(ai_results)")
+            }
+            proposal = connection.execute(
+                "SELECT target_category, status FROM question_addition_proposals WHERE id='proposal'"
+            ).fetchone()
+        self.assertIn("target_question_category", task_columns)
+        self.assertIn("target_question_category", result_columns)
+        self.assertEqual(("APPLICATION", "PROPOSED"), tuple(proposal))
 
         with self.database.connection() as connection:
             columns = {
@@ -240,7 +296,7 @@ class MigrationTests(unittest.TestCase):
                     """INSERT INTO questions(
                         id, question_set_id, display_order, question_text,
                         competency_key, source_kind, purpose, expected_evidence
-                    ) VALUES ('q10', 'set', 10, 'Tenth', 'skill', 'MANUAL', 'purpose', 'evidence')"""
+                    ) VALUES ('q31', 'set', 31, 'Thirty-first', 'skill', 'MANUAL', 'purpose', 'evidence')"""
                 )
             connection.execute(
                 """INSERT INTO assessment_attempts(

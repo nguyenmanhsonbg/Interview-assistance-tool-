@@ -1413,6 +1413,18 @@ Tài liệu được xem là đạt yêu cầu Domain and Database Specification
 
 Domain/database MVP được tổ chức quanh InterviewCase và giữ riêng các snapshot cần để tái lập quá trình: JD/CV version, Question Set version, Assessment Attempt/Answer, AI task/result version, Interview Brief version và Final Evaluation revision.
 
+## Addendum 2026-10-08 — Question Addition Generation
+
+Đối với chức năng Committee thêm câu hỏi mới, Question Set ban đầu vẫn tạo đúng 9 câu theo
+phân bổ 3/4/2. Sau khi tạo, Question Set ở trạng thái DRAFT/GENERATED được phép có từ 9 đến
+30 câu; `display_order` liên tục và câu mới append ở cuối. Question Set APPROVED hoặc đã có
+AssessmentAttempt là bất biến. Candidate HTML hỗ trợ tối đa 30 câu; Excel contract cũ vẫn giữ
+giới hạn riêng và không phải đường chính cho Question Set mở rộng.
+
+Migration 009 bổ sung `GENERATE_QUESTION_ADDITION`/`QUESTION_ADDITION`, scope version theo
+Question Set và target category, cùng bảng `question_addition_proposals` cho lifecycle
+PROPOSED/APPLIED/DISCARDED. Các câu hỏi hiện có không bị đổi ID/order khi apply proposal.
+
 Các quyết định nghiệp vụ đã được phản ánh:
 
 - Default assessment là 8 câu trong 15 phút.

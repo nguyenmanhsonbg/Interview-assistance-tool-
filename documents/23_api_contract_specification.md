@@ -137,8 +137,10 @@ Candidate không được đọc JD, CV, rubric, expected evidence, AI result, I
 | POST | /api/v1/interview-cases/{caseId}/documents/{documentId}/confirm | Committee | Confirm text |
 | POST/GET/PATCH | /api/v1/interview-cases/{caseId}/question-set | Committee | Generate/read/edit set |
 | POST/GET | /api/v1/interview-cases/{caseId}/question-set/questions/{questionId}/variants và `.../variants/{variantId}` | Committee | Generate/read proposal; collection GET đọc proposal `PROPOSED` để resume/re-entry |
+| POST/GET | /api/v1/interview-cases/{caseId}/question-set/question-additions và `.../question-additions/{proposalId}` | Committee | Generate/read new-question proposal by group |
 | POST | /api/v1/interview-cases/{caseId}/question-set/questions/{questionId}/variants/{variantId}/discard | Committee | Discard proposal |
 | POST | /api/v1/interview-cases/{caseId}/question-set/questions/{questionId}/variants/{variantId}/apply | Committee | Apply proposal to draft slot |
+| POST | /api/v1/interview-cases/{caseId}/question-set/question-additions/{proposalId}/discard hoặc `/apply` | Committee | Discard/apply new question proposal |
 | POST | /api/v1/interview-cases/{caseId}/question-set/approve | Committee | Approve set |
 | POST/GET | /api/v1/interview-cases/{caseId}/assessment | Committee | Create/read attempt |
 | POST | /api/v1/interview-cases/{caseId}/assessment/start | Committee | Start Candidate Mode |
@@ -679,6 +681,13 @@ Primary Committee endpoints:
 | POST | `/api/v1/interview-cases/{caseId}/candidate-package/import` | Binary HTML body, max 10 MiB; JSON snapshot envelope | Committee session + startup token + idempotency key |
 
 The exported package format is `candidate-html.v1`. It contains only candidate-safe question fields. The candidate submits a `RESPONSE` package; import validates the case-owned Question Set ID/version/fingerprint and exact question projection before creating an immutable `HTML_IMPORT` Assessment Snapshot. Excel export/import remains supported as an explicitly labeled fallback through the existing `/question-set/export` and `/assessment-snapshots/import` routes.
+
+### 6.4.1. Question addition API addendum
+
+`POST .../question-additions` nhận `questionSetId`, `questionCategory`, `mode` (`USER_PROMPT` hoặc
+`AUTO_GROUP`) và prompt tùy mode; trả 202/taskId. Proposal được đọc qua GET và chỉ được apply
+với expected Question Set timestamp/fingerprint hiện hành. Question Set mở rộng được 9–30 câu;
+candidate HTML giữ đúng count/fingerprint. Excel fallback không được mở rộng cho set >9.
 
 Evaluation consumes the normalized snapshot shape and records `sourceKind`, `sourceFileSha256`, and `packageId`; no HTML source or raw package bytes are sent to an AI provider.
 

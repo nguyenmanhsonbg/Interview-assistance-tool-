@@ -31,6 +31,7 @@ Mỗi AI call phải:
 | --- | --- | --- | --- |
 | Generate questions | GENERATE_QUESTIONS | JD text, CV text, job/level, policy | Competency matrix, 5–8 proposed questions, rubric, evidence |
 | Generate question variant | GENERATE_QUESTION_VARIANT | Sanitized JD/CV context, current question, mode và bounded user prompt | Một proposal `QUESTION_VARIANT` cho đúng question slot |
+| Generate question addition | GENERATE_QUESTION_ADDITION | Sanitized JD/CV, target category, existing question summaries, mode và bounded user prompt | Một proposal `QUESTION_ADDITION` cho câu mới |
 | Evaluate answers | EVALUATE_ASSESSMENT | JD/CV, approved Question Set, answers | Two-pass per-answer evidence analysis and synthesized evaluation |
 | Suggest follow-up | SUGGEST_FOLLOW_UP | Interview Brief, live notes, remaining competencies | 1–3 live follow-up questions, reason, evidence, stop condition |
 
@@ -113,6 +114,14 @@ Bắt buộc:
 
 AI không được trả hoặc thay đổi question ID, display order, competency, category, type, difficulty, required, estimated seconds hoặc source kind.
 
+### 3.2.2. Question addition input
+
+Input bắt buộc Question Set DRAFT/GENERATED ID, target category, mode `USER_PROMPT` hoặc
+`AUTO_GROUP`, sanitized JD/CV và các câu hiện có để tránh lặp. Prompt USER_PROMPT sau trim tối
+đa 2.000 ký tự và là untrusted instruction. Mapping source kind là FOUNDATION → STANDARDIZED,
+APPLICATION → SITUATIONAL; DEEP_DIVE cho phép CV_VERIFICATION hoặc GAP_CONFLICT. Output không
+được thay đổi identity hoặc workflow policy.
+
 ### 3.3. Answer evaluation input
 
 Bắt buộc:
@@ -157,6 +166,13 @@ AI question output chỉ là DRAFT. HĐCM phải chỉnh/sắp xếp/duyệt tr�
 ### 4.1.1. Generate question variant
 
 Output `question-variant.v1` có `schemaVersion`, `operation=GENERATE_QUESTION_VARIANT`, `mode`, `questionSetId`, `sourceQuestionId`, `variant`, `confidence` và `limitations`. `variant` chỉ gồm question text, purpose, next-step objective, expected evidence và rubric đã validate. Output là proposal, không tự apply và không có PASS/FAIL.
+
+### 4.1.2. Generate question addition
+
+Output `question-addition.v1` có `schemaVersion`, `operation=GENERATE_QUESTION_ADDITION`,
+`mode`, `questionSetId`, `targetCategory`, một object `question` đầy đủ content/rubric,
+`confidence` và `limitations`. Output là proposal, không tự thêm câu. Human-readable fields
+dùng tiếng Việt; enum/field names giữ nguyên.
 
 ### 4.2. Evaluate answers — active two-pass contract
 

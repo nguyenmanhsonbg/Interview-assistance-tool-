@@ -9,12 +9,13 @@ from html.parser import HTMLParser
 from typing import Any, Mapping, Sequence
 
 from app.domain.errors import ValidationError
+from app.domain.rules import MAX_QUESTION_SET_QUESTIONS
 
 
 HTML_PACKAGE_FORMAT_VERSION = "candidate-html.v1"
 HTML_CONTENT_TYPE = "text/html; charset=utf-8"
 MAX_HTML_PACKAGE_BYTES = 10 * 1024 * 1024
-MAX_QUESTIONS = 9
+MAX_QUESTIONS = MAX_QUESTION_SET_QUESTIONS
 MAX_TEXT_CHARS = 10_000
 
 _PACKAGE_TYPES = {"QUESTION", "DRAFT", "RESPONSE"}

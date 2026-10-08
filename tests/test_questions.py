@@ -90,6 +90,29 @@ class QuestionServiceTests(MigratedDatabaseFixture, unittest.TestCase):
         with self.assertRaises(ValidationError):
             service.create_manual_draft(self.case["id"], invalid)
 
+    def test_edit_and_approve_question_set_with_up_to_thirty_questions(self):
+        from app.domain.errors import ValidationError
+        from app.services.question_service import QuestionService
+
+        service = QuestionService(self.database)
+        question_set = service.create_manual_draft(
+            self.case["id"], valid_questions(), duration_seconds=900
+        )
+
+        expanded = valid_questions(10)
+        updated = service.update_draft(question_set["id"], expanded)
+        self.assertEqual(10, len(updated["questions"]))
+        self.assertEqual(list(range(1, 11)), [
+            question["displayOrder"] for question in updated["questions"]
+        ])
+
+        approved = service.approve(question_set["id"], self._lead_id())
+        self.assertEqual("APPROVED", approved["status"])
+        self.assertEqual(10, len(approved["questions"]))
+
+        with self.assertRaises(ValidationError):
+            service.update_draft(question_set["id"], valid_questions(31))
+
     def _lead_id(self):
         with self.database.connection() as connection:
             return connection.execute(

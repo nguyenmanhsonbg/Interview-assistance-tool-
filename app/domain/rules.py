@@ -5,6 +5,10 @@ from collections.abc import Collection
 from app.domain.errors import StateConflict, ValidationError
 
 
+MAX_QUESTION_SET_QUESTIONS = 30
+MAX_ADDITION_PROMPT_CHARS = 2000
+
+
 def require_text(value: object, field: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValidationError(f"{field} is required")

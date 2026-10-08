@@ -293,6 +293,13 @@ Machine A is not a second API client and does not receive the server startup tok
 
 The accepted MVP threat model is protection against ordinary operational mistakes: wrong file, wrong case, draft file, malformed file, duplicate import, and accidental re-import. Deliberate modification of a local HTML file by a determined actor is out of scope for this supervised local MVP; case-owned Question Set ID/version/fingerprint, exact question projection, source hash, idempotency, audit, and immutable snapshot versioning still prevent silent mixing during normal operation.
 
+### Question addition security addendum
+
+Question addition dùng startup token + Committee session, server-side case ownership và state
+lock. Prompt tối đa 2.000 ký tự, được coi là untrusted; AI chỉ nhận sanitized JD/CV/question
+context. Audit chỉ lưu ID, mode/category, fingerprint, task/result version và error code; không
+lưu raw prompt, raw AI payload, JD/CV, answer hoặc secret. Apply stale phải rollback nguyên tử.
+
 ## 18. Acceptance criteria
 
 1. Trust boundary and threat model are explicit.

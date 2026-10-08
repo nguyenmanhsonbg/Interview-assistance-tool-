@@ -247,6 +247,13 @@ The Committee workspace uses this four-step active flow:
 
 The primary Questions action is `candidate-package/export`; the primary Answers action accepts `.html` and calls `candidate-package/import` with `Content-Type: text/html`. The existing Excel bridge is retained as a visible `Excel fallback`. Committee navigation does not open Candidate Mode or require a second server, LAN access, browser storage, or a candidate token for this offline package flow.
 
+### Question Set group addition addendum
+
+Sidebar luôn render ba group FOUNDATION/APPLICATION/DEEP_DIVE và nút `Thêm câu hỏi` ở mỗi
+group. Popup có đúng hai lựa chọn `Gen theo prompt` và `Tự động gen`. Cả hai đều tạo proposal
+async; Committee xem preview rồi `Dùng câu hỏi này`, `Tạo lại` hoặc `Bỏ qua`. UI không hiển thị
+Excel fallback trong luồng active và không cho mutation khi set APPROVED/assessment-started.
+
 Candidate HTML is self-contained and must not load external resources. The Committee UI validates extension and the 10 MiB limit before upload, uses the server idempotency key, and renders imported answer/question text with `textContent`.
 
 ## 8. Acceptance criteria

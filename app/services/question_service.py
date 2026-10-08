@@ -8,7 +8,7 @@ from typing import Any
 from app.ai.schemas import validate_question_generation
 from app.database import Database
 from app.domain.errors import ResourceNotFound, StateConflict, ValidationError
-from app.domain.rules import require_text
+from app.domain.rules import MAX_QUESTION_SET_QUESTIONS, require_text
 from app.repositories.audit import append_audit
 from app.repositories.questions import QuestionRepository
 
@@ -78,7 +78,7 @@ class QuestionService:
     def update_draft(
         self, question_set_id: str, questions: list[dict[str, Any]]
     ) -> dict[str, Any]:
-        normalized = _validate_questions(questions)
+        normalized = _validate_questions(questions, allow_expanded=True)
         with self.database.transaction() as connection:
             row = connection.execute(
                 "SELECT * FROM question_sets WHERE id=?", (question_set_id,)
@@ -133,12 +133,13 @@ class QuestionService:
             ).fetchone()
             if member is None:
                 raise ValidationError("Approving member does not belong to this case")
-            count = connection.execute(
-                "SELECT COUNT(*) FROM questions WHERE question_set_id=?",
+            rows = connection.execute(
+                "SELECT * FROM questions WHERE question_set_id=? ORDER BY display_order",
                 (question_set_id,),
-            ).fetchone()[0]
-            if count != 9:
-                raise ValidationError("Question Set must contain exactly 9 questions")
+            ).fetchall()
+            questions = [_question_from_row(row) for row in rows]
+            normalized = _validate_questions(questions, allow_expanded=True)
+            count = len(normalized)
             connection.execute(
                 """UPDATE question_sets SET status='APPROVED', approved_by_member_id=?,
                    approved_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),
@@ -240,8 +241,15 @@ class QuestionService:
         return self.repository.get_set(question_set_id)
 
 
-def _validate_questions(questions: Any) -> list[dict[str, Any]]:
-    if not isinstance(questions, list) or len(questions) != 9:
+def _validate_questions(
+    questions: Any, *, allow_expanded: bool = False
+) -> list[dict[str, Any]]:
+    maximum = MAX_QUESTION_SET_QUESTIONS if allow_expanded else 9
+    if not isinstance(questions, list) or not 9 <= len(questions) <= maximum:
+        if allow_expanded:
+            raise ValidationError(
+                f"Question Set must contain between 9 and {MAX_QUESTION_SET_QUESTIONS} questions"
+            )
         raise ValidationError("Question Set must contain exactly 9 questions")
     normalized: list[dict[str, Any]] = []
     orders: set[int] = set()
@@ -249,8 +257,8 @@ def _validate_questions(questions: Any) -> list[dict[str, Any]]:
         if not isinstance(question, dict):
             raise ValidationError("Question must be an object")
         order = question.get("displayOrder")
-        if not isinstance(order, int) or isinstance(order, bool) or order in orders or not 1 <= order <= 9:
-            raise ValidationError("displayOrder must be unique and between 1 and 9")
+        if not isinstance(order, int) or isinstance(order, bool) or order in orders or not 1 <= order <= maximum:
+            raise ValidationError(f"displayOrder must be unique and between 1 and {maximum}")
         orders.add(order)
         rubric = question.get("rubric")
         if not isinstance(rubric, dict) or any(
@@ -282,20 +290,40 @@ def _validate_questions(questions: Any) -> list[dict[str, Any]]:
             }
         )
     normalized = sorted(normalized, key=lambda item: item["displayOrder"])
-    if [item["displayOrder"] for item in normalized] != list(range(1, 10)):
-        raise ValidationError("displayOrder values must be contiguous from 1 to 9")
+    if [item["displayOrder"] for item in normalized] != list(range(1, len(normalized) + 1)):
+        raise ValidationError("displayOrder values must be contiguous from 1 to question count")
     categories = [item["questionCategory"] for item in normalized]
     if any(category not in {"FOUNDATION", "APPLICATION", "DEEP_DIVE"} for category in categories):
         raise ValidationError("questionCategory is invalid")
-    counts = {
-        category: categories.count(category)
-        for category in ("FOUNDATION", "APPLICATION", "DEEP_DIVE")
-    }
-    if counts != {"FOUNDATION": 3, "APPLICATION": 4, "DEEP_DIVE": 2}:
-        raise ValidationError(
-            "Question Set must use the FOUNDATION/APPLICATION/DEEP_DIVE distribution 3/4/2"
-        )
+    if not allow_expanded:
+        counts = {
+            category: categories.count(category)
+            for category in ("FOUNDATION", "APPLICATION", "DEEP_DIVE")
+        }
+        if counts != {"FOUNDATION": 3, "APPLICATION": 4, "DEEP_DIVE": 2}:
+            raise ValidationError(
+                "Question Set must use the FOUNDATION/APPLICATION/DEEP_DIVE distribution 3/4/2"
+            )
     return normalized
+
+
+def _question_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "displayOrder": row["display_order"],
+        "questionText": row["question_text"],
+        "competencyKey": row["competency_key"],
+        "sourceKind": row["source_kind"],
+        "questionCategory": row["question_category"],
+        "purpose": row["purpose"],
+        "nextStepObjective": row["next_step_objective"],
+        "questionType": row["question_type"],
+        "difficulty": row["difficulty"],
+        "expectedEvidence": row["expected_evidence"],
+        "rubric": json.loads(row["rubric_json"]),
+        "isRequired": bool(row["is_required"]),
+        "estimatedSeconds": row["estimated_seconds"],
+    }
 
 
 def _insert_questions(

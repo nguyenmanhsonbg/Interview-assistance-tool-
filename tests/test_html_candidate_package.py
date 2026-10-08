@@ -39,6 +39,19 @@ def _questions() -> list[dict]:
     ]
 
 
+def _many_questions(count: int) -> list[dict]:
+    return [
+        {
+            "questionId": f"q-{index}",
+            "displayOrder": index,
+            "questionText": f"Question {index}",
+            "questionType": "LONG_TEXT",
+            "isRequired": True,
+        }
+        for index in range(1, count + 1)
+    ]
+
+
 def _package_html(package_type: str, answers: list[dict], *, manifest=None) -> bytes:
     payload = {
         "formatVersion": "candidate-html.v1",
@@ -71,6 +84,25 @@ def _package_html(package_type: str, answers: list[dict], *, manifest=None) -> b
 
 
 class HtmlCandidatePackageTests(unittest.TestCase):
+    def test_candidate_html_supports_thirty_questions_but_rejects_thirty_one(self):
+        from app.infrastructure.html_candidate_package import (
+            export_question_package,
+            import_candidate_package,
+        )
+
+        questions = _many_questions(30)
+        manifest = {**_manifest(), "questionCount": 30}
+        raw = export_question_package(manifest, questions)
+        parsed = import_candidate_package(raw)
+        self.assertEqual(30, parsed.manifest["questionCount"])
+        self.assertEqual(30, len(parsed.questions))
+        self.assertEqual(30, parsed.questions[-1]["displayOrder"])
+
+        with self.assertRaises(ValidationError):
+            export_question_package(
+                {**_manifest(), "questionCount": 31}, _many_questions(31)
+            )
+
     def test_question_export_round_trips_candidate_safe_self_contained_html(self):
         from app.infrastructure.html_candidate_package import (
             HTML_CONTENT_TYPE,

@@ -242,6 +242,13 @@ The following acceptance checks are required in addition to the existing Candida
 - HTML-imported snapshots queue and complete `answer-evaluation.v2`; the provider payload contains sanitized JD/CV/question/answer data but never HTML/package bytes or internal tokens.
 - Excel export/import remains a passing fallback path.
 
+### Question addition acceptance addendum
+
+- Question Set ban đầu vẫn 9 câu 3/4/2; sau apply proposal được 9–30 câu với display order liên tục.
+- Mỗi group có nút thêm; `USER_PROMPT`/`AUTO_GROUP` tạo proposal, không tự mutate.
+- Apply/discard, idempotency, stale fingerprint, schema failure, lock và candidate isolation phải được test.
+- Candidate HTML export/import phải giữ đúng count 10–30; Excel contract cũ vẫn giới hạn riêng.
+
 ## 16. Acceptance criteria
 
 1. Có test strategy, environment, fixtures và testcase format.
