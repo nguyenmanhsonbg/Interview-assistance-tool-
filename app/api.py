@@ -22,6 +22,7 @@ from app.services.html_candidate_package_service import HtmlCandidatePackageServ
 from app.services.interview_brief_service import InterviewBriefService
 from app.services.interview_service import InterviewService
 from app.services.question_generation_service import QuestionGenerationService
+from app.services.question_addition_service import QuestionAdditionService
 from app.services.question_service import QuestionService
 from app.services.question_variant_service import QuestionVariantService
 
@@ -54,6 +55,12 @@ class APIController:
         self.html_assessments = HtmlCandidatePackageService(database)
         self.questions = QuestionService(database)
         self.question_variants = QuestionVariantService(
+            database,
+            schema_root,
+            provider_name=ai_provider_name,
+            model_name=ai_model_name,
+        )
+        self.question_additions = QuestionAdditionService(
             database,
             schema_root,
             provider_name=ai_provider_name,
@@ -101,6 +108,11 @@ class APIController:
         router.add("GET", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set", self.get_question_set, **committee)
         router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set", self.generate_question_set, **committee)
         router.add("PATCH", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set", self.update_question_set, **committee)
+        router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set/question-additions", self.create_question_addition, **committee)
+        router.add("GET", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set/question-additions", self.list_question_additions, **committee)
+        router.add("GET", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set/question-additions/(?P<proposal_id>[^/]+)", self.get_question_addition, **committee)
+        router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set/question-additions/(?P<proposal_id>[^/]+)/discard", self.discard_question_addition, **committee)
+        router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set/question-additions/(?P<proposal_id>[^/]+)/apply", self.apply_question_addition, **committee)
         router.add("POST", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set/questions/(?P<question_id>[^/]+)/variants", self.create_question_variant, **committee)
         router.add("GET", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set/questions/(?P<question_id>[^/]+)/variants", self.list_question_variants, **committee)
         router.add("GET", r"/api/v1/interview-cases/(?P<case_id>[^/]+)/question-set/questions/(?P<question_id>[^/]+)/variants/(?P<variant_id>[^/]+)", self.get_question_variant, **committee)
@@ -231,6 +243,90 @@ class APIController:
     def update_question_set(self, request: Request) -> Response:
         body = _body(request)
         return _ok(request, {"questionSet": self.questions.update_draft(body.get("questionSetId"), body.get("questions", []))})
+
+    def create_question_addition(self, request: Request) -> Response:
+        body = _body(request)
+        question_set_id = body.get("questionSetId")
+        if not isinstance(question_set_id, str) or not question_set_id.strip():
+            raise ValidationError("questionSetId is required")
+        task = self.question_additions.request_addition(
+            request.path_params["case_id"],
+            question_set_id,
+            body.get("questionCategory"),
+            body.get("mode"),
+            body.get("prompt"),
+            _idempotency(request, "question-addition"),
+        )
+        self.submit_task(task["id"])
+        return _ok(
+            request,
+            {
+                "taskId": task["id"],
+                "status": task["status"],
+                "questionSetId": question_set_id,
+                "questionCategory": task.get("targetQuestionCategory"),
+                "mode": task["inputManifest"].get("mode"),
+            },
+            status=202,
+        )
+
+    def list_question_additions(self, request: Request) -> Response:
+        question_set_id = (
+            request.query.get("questionSetId", [None])[0]
+            or self._question_set_id(request.path_params["case_id"])
+        )
+        category = request.query.get("questionCategory", [None])[0]
+        if category is not None and category not in {"FOUNDATION", "APPLICATION", "DEEP_DIVE"}:
+            raise ValidationError("Unsupported question addition category")
+        items = self.question_additions.list_active_proposals(
+            request.path_params["case_id"], question_set_id, category
+        )
+        return _ok(request, {"items": items})
+
+    def get_question_addition(self, request: Request) -> Response:
+        question_set_id = request.query.get("questionSetId", [None])[0]
+        if question_set_id:
+            proposal = self.question_additions.get_proposal(
+                request.path_params["case_id"],
+                question_set_id,
+                request.path_params["proposal_id"],
+            )
+        else:
+            proposal = self.question_additions.get_proposal_by_id(
+                request.path_params["case_id"], request.path_params["proposal_id"]
+            )
+        return _ok(request, proposal)
+
+    def discard_question_addition(self, request: Request) -> Response:
+        proposal = self.question_additions.get_proposal_by_id(
+            request.path_params["case_id"], request.path_params["proposal_id"]
+        )
+        discarded = self.question_additions.discard_proposal(
+            request.path_params["case_id"],
+            proposal["questionSetId"],
+            request.path_params["proposal_id"],
+        )
+        return _ok(request, discarded)
+
+    def apply_question_addition(self, request: Request) -> Response:
+        body = _body(request)
+        question_set_id = body.get("questionSetId")
+        updated_at = body.get("expectedQuestionSetUpdatedAt")
+        fingerprint = body.get("expectedSourceFingerprint")
+        if not isinstance(question_set_id, str) or not question_set_id.strip():
+            raise ValidationError("questionSetId is required")
+        if not isinstance(updated_at, str) or not updated_at.strip():
+            raise ValidationError("expectedQuestionSetUpdatedAt is required")
+        if not isinstance(fingerprint, str) or not fingerprint.strip():
+            raise ValidationError("expectedSourceFingerprint is required")
+        applied = self.question_additions.apply_proposal(
+            request.path_params["case_id"],
+            question_set_id,
+            request.path_params["proposal_id"],
+            updated_at,
+            fingerprint,
+        )
+        return _ok(request, applied)
 
     def create_question_variant(self, request: Request) -> Response:
         body = _body(request)
@@ -433,7 +529,7 @@ class APIController:
     def get_task(self, request: Request) -> Response:
         task = self.tasks.get(request.path_params["task_id"])
         result = task.pop("result", None)
-        safe_task = {key: task[key] for key in ("id", "taskType", "status", "phase", "assessmentSnapshotId", "sourceQuestionId", "createdAt", "startedAt", "finishedAt", "errorCode")}
+        safe_task = {key: task[key] for key in ("id", "taskType", "status", "phase", "assessmentSnapshotId", "sourceQuestionId", "targetQuestionCategory", "createdAt", "startedAt", "finishedAt", "errorCode")}
         if safe_task["status"] == "COMPLETED" and safe_task["errorCode"] == "AI_MATERIALIZATION_FAILED":
             safe_task["status"] = "FAILED"
         variant_proposal_id = None
@@ -444,6 +540,14 @@ class APIController:
                     (result["id"],),
                 ).fetchone()
             variant_proposal_id = None if proposal is None else proposal["id"]
+        addition_proposal_id = None
+        if task["taskType"] == "GENERATE_QUESTION_ADDITION" and result is not None:
+            with self.database.connection() as connection:
+                proposal = connection.execute(
+                    "SELECT id FROM question_addition_proposals WHERE ai_result_id=?",
+                    (result["id"],),
+                ).fetchone()
+            addition_proposal_id = None if proposal is None else proposal["id"]
         if safe_task["status"] == "COMPLETED":
             case_status = (
                 self.evaluations.refined_status(task["interviewCaseId"])
@@ -462,9 +566,14 @@ class APIController:
             elif task["taskType"] == "GENERATE_QUESTION_VARIANT" and variant_proposal_id is None:
                 safe_task["status"] = "RUNNING"
                 safe_task["finishedAt"] = None
+            elif task["taskType"] == "GENERATE_QUESTION_ADDITION" and addition_proposal_id is None:
+                safe_task["status"] = "RUNNING"
+                safe_task["finishedAt"] = None
         safe_result = {"id": None, "resultType": None, "versionNo": None} if result is None else {key: result[key] for key in ("id", "resultType", "versionNo")}
         if task["taskType"] == "GENERATE_QUESTION_VARIANT" and result is not None:
             safe_task["proposalId"] = variant_proposal_id
+        if task["taskType"] == "GENERATE_QUESTION_ADDITION" and result is not None:
+            safe_task["additionProposalId"] = addition_proposal_id
         return _ok(request, {"task": safe_task, "result": safe_result})
 
     def get_brief(self, request: Request) -> Response:

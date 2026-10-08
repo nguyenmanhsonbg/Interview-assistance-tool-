@@ -227,6 +227,9 @@ class QuestionAdditionService:
             case_id, question_set_id, target_category
         )
 
+    def get_proposal_by_id(self, case_id: str, proposal_id: str) -> dict[str, Any]:
+        return self.repository.get_proposal_by_id(case_id, proposal_id)
+
     def discard_proposal(
         self, case_id: str, question_set_id: str, proposal_id: str
     ) -> dict[str, Any]:

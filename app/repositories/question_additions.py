@@ -43,6 +43,19 @@ class QuestionAdditionRepository(RepositoryBase):
         sql += " ORDER BY p.created_at DESC, p.id DESC"
         return [_proposal_dict(row) for row in self.query_all(sql, parameters)]
 
+    def get_proposal_by_id(self, case_id: str, proposal_id: str) -> dict[str, Any]:
+        row = self.query_one(
+            """SELECT p.*, r.payload_json, r.version_no,
+                      r.created_at AS result_created_at
+               FROM question_addition_proposals p
+               JOIN ai_results r ON r.id=p.ai_result_id
+               WHERE p.id=? AND p.interview_case_id=?""",
+            (proposal_id, case_id),
+        )
+        if row is None:
+            raise ResourceNotFound("Question addition proposal not found")
+        return _proposal_dict(row)
+
     def create_proposal_from_result(
         self,
         connection: sqlite3.Connection,

@@ -15,6 +15,7 @@ from app.infrastructure.excel_question_answer import (
 from app.infrastructure.html_candidate_package import import_candidate_package
 from tests.ai_fixtures import (
     answer_evaluation_v2_payload,
+    question_addition_payload,
     question_generation_payload,
     question_variant_payload,
 )
@@ -72,6 +73,13 @@ class FakePilotProvider:
         result["questionSetId"] = payload["questionSetId"]
         result["sourceQuestionId"] = payload["sourceQuestionId"]
         result["mode"] = payload["mode"]
+        return result
+
+    def generate_question_addition(self, payload):
+        result = question_addition_payload(payload["targetCategory"])
+        result["questionSetId"] = payload["questionSetId"]
+        result["mode"] = payload["mode"]
+        result["targetCategory"] = payload["targetCategory"]
         return result
 
     def evaluate_answers(self, payload):
@@ -226,6 +234,102 @@ class PilotE2ETests(unittest.TestCase):
             "POST", f"/api/v1/interview-cases/{case_id}/question-set/approve",
             {"questionSetId": question_set_id, "memberId": member_id, "confirmation": "APPROVE_QUESTION_SET"},
             headers=self.committee_headers(),
+        )
+
+    def confirm_documents(self, case_id):
+        for document_type, text in (
+            ("JD", "Senior backend role"),
+            ("CV", "Backend experience"),
+        ):
+            document = self.call(
+                "POST", f"/api/v1/interview-cases/{case_id}/documents",
+                {"documentType": document_type, "sourceKind": "MANUAL_TEXT", "text": text},
+                headers=self.committee_headers(),
+            )["document"]
+            self.call(
+                "POST",
+                f"/api/v1/interview-cases/{case_id}/documents/{document['id']}/confirm",
+                {"confirmed": True, "textSha256": document["contentSha256"]},
+                headers=self.committee_headers(),
+            )
+
+    def test_question_addition_api_creates_reads_applies_and_discards(self):
+        case, question_set = self.create_manual_case("JOB-ADDITION", "CAND-ADDITION")
+        self.confirm_documents(case["id"])
+        base = f"/api/v1/interview-cases/{case['id']}/question-set/question-additions"
+        task = self.call(
+            "POST", base,
+            {
+                "questionSetId": question_set["id"],
+                "questionCategory": "APPLICATION",
+                "mode": "AUTO_GROUP",
+            },
+            headers={**self.committee_headers(), "X-Idempotency-Key": "addition-api-key"},
+        )
+        self.assertEqual("APPLICATION", task["questionCategory"])
+        completed = self.wait_task(task["taskId"])
+        self.assertEqual("APPLICATION", completed["task"]["targetQuestionCategory"])
+        self.assertIsNotNone(completed["task"]["additionProposalId"])
+
+        listed = self.call(
+            "GET", f"{base}?questionSetId={question_set['id']}&questionCategory=APPLICATION",
+            headers=self.committee_headers(False),
+        )
+        proposal = listed["items"][0]
+        self.assertNotIn("payload", proposal)
+        detail = self.call(
+            "GET", f"{base}/{proposal['id']}", headers=self.committee_headers(False)
+        )
+        applied = self.call(
+            "POST", f"{base}/{proposal['id']}/apply",
+            {
+                "questionSetId": question_set["id"],
+                "expectedQuestionSetUpdatedAt": question_set["updatedAt"],
+                "expectedSourceFingerprint": detail["sourceFingerprint"],
+            },
+            headers=self.committee_headers(),
+        )
+        self.assertEqual(10, applied["question"]["displayOrder"])
+        self.assertEqual("APPLIED", applied["proposal"]["status"])
+
+        second = self.call(
+            "POST", base,
+            {
+                "questionSetId": question_set["id"],
+                "questionCategory": "FOUNDATION",
+                "mode": "AUTO_GROUP",
+            },
+            headers={**self.committee_headers(), "X-Idempotency-Key": "addition-api-discard"},
+        )
+        self.wait_task(second["taskId"])
+        foundation = self.call(
+            "GET", f"{base}?questionSetId={question_set['id']}&questionCategory=FOUNDATION",
+            headers=self.committee_headers(False),
+        )["items"][0]
+        discarded = self.call(
+            "POST", f"{base}/{foundation['id']}/discard", headers=self.committee_headers()
+        )
+        self.assertEqual("DISCARDED", discarded["status"])
+
+        self.assertEqual(
+            401,
+            self.error_status("POST", base, {
+                "questionSetId": question_set["id"],
+                "questionCategory": "APPLICATION",
+                "mode": "AUTO_GROUP",
+            }),
+        )
+        self.assertEqual(
+            422,
+            self.error_status(
+                "POST", base,
+                {
+                    "questionSetId": question_set["id"],
+                    "questionCategory": "APPLICATION",
+                    "mode": "UNSUPPORTED",
+                },
+                headers=self.committee_headers(),
+            ),
         )
 
     def test_question_variant_export_contains_only_explicitly_applied_prompt(self):
