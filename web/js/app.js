@@ -1514,8 +1514,10 @@ function renderQuestionWorkspace(questionSet, caseId, onRefresh, assessmentStart
       const groupCopy = element("div", undefined, "stack");
       groupCopy.append(element("h3", group.label), element("span", group.items.length + " cÃ¢u", "question-group-count"));
       groupTitle.append(groupCopy);
-      if (["FOUNDATION", "APPLICATION", "DEEP_DIVE"].includes(group.key)) {
-        const addButton = button("ThÃªm cÃ¢u há»i", () => {
+      const isStandardGroup = ["FOUNDATION", "APPLICATION", "DEEP_DIVE"].includes(group.key);
+      let addButton = null;
+      if (isStandardGroup) {
+        addButton = button("", () => {
           if (mutationLocked) return;
           openQuestionAdditionChoice(group.key, {
             onPrompt: () => openQuestionAdditionPrompt(group.key, {
@@ -1529,14 +1531,16 @@ function renderQuestionWorkspace(questionSet, caseId, onRefresh, assessmentStart
               await onRefresh();
             },
           });
-        }, "secondary question-group-add");
+        }, "master-item question-add-card");
         addButton.dataset.questionCategory = group.key;
+        addButton.setAttribute("aria-label", "ThÃªm cÃ¢u há»i vÃ o " + group.label);
+        const plus = element("span", "+", "question-add-card-plus");
+        plus.setAttribute("aria-hidden", "true");
+        addButton.append(plus);
         addButton.disabled = mutationLocked || Boolean(activeQuestionAddition(caseId, questionSet.id, group.key));
-        groupTitle.append(addButton);
       }
       groupSection.append(groupTitle);
       const additionHost = element("div", undefined, "question-addition-progress");
-      groupSection.append(additionHost);
       for (const question of group.items) {
         const item = button("", () => {
           selectedId = question.id;
@@ -1553,10 +1557,14 @@ function renderQuestionWorkspace(questionSet, caseId, onRefresh, assessmentStart
         item.append(element("span", categoryLabel(question.questionCategory) + " · " + safeText(question.difficulty), "master-item-meta"));
         groupSection.append(item);
       }
-      master.append(groupSection);
-      if (!mutationLocked && ["FOUNDATION", "APPLICATION", "DEEP_DIVE"].includes(group.key)) {
-        loadQuestionAdditionState(additionHost, group.key, questionSet, caseId, async () => onRefresh());
+      if (isStandardGroup) {
+        groupSection.append(additionHost);
+        if (!mutationLocked) {
+          loadQuestionAdditionState(additionHost, group.key, questionSet, caseId, async () => onRefresh());
+        }
+        groupSection.append(addButton);
       }
+      master.append(groupSection);
     }
     const selected = questions.find((question) => question.id === selectedId) || questions[0];
     detailHost.setAttribute("aria-labelledby", selected ? "question-tab-" + selected.id : "");

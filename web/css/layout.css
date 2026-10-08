@@ -48,7 +48,9 @@
 .question-group-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 6px; border-bottom: 1px solid var(--ui-border); }
 .question-group-title h3 { margin: 0; }
 .question-group-count { color: var(--ui-muted); font-size: 12px; }
-.question-group-add { flex: none; min-height: 34px; padding: 7px 12px; }
+.question-add-card { place-items: center; min-height: 72px; padding: 14px; color: var(--ui-primary); text-align: center; border-style: dashed; background: var(--ui-primary-soft); }
+.question-add-card:hover:not(:disabled) { border-color: var(--ui-primary); background: var(--ui-surface); }
+.question-add-card-plus { font-size: 32px; font-weight: 400; line-height: 1; }
 .question-addition-progress { display: grid; gap: 10px; }
 .question-addition-choice .modal { width: min(440px, 100%); }
 .question-addition-proposal { border-color: var(--ui-primary); background: var(--ui-primary-soft); }

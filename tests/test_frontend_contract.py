@@ -237,10 +237,12 @@ class FrontendContractTests(unittest.TestCase):
             self.assertIn(marker, scripts)
         for marker in (
             "question-group-title",
-            "question-group-add",
+            "question-add-card",
+            "question-add-card-plus",
             "question-addition-choice",
             "question-addition-proposal",
             "question-addition-progress",
+            "groupSection.append(addButton);",
         ):
             self.assertIn(marker, styles + scripts)
         self.assertIn('questionSet.status === "APPROVED" || assessmentStarted', scripts)
