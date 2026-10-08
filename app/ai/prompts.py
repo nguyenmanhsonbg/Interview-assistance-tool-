@@ -17,6 +17,9 @@ _PROMPTS = {
     "question_variant_generation": (
         "question_variant_generation_prompt.md", "question-variant.v1"
     ),
+    "question_addition_generation": (
+        "question_addition_generation_prompt.md", "question-addition.v1"
+    ),
     "answer_evaluation": ("answer_evaluation_prompt.md", "answer-evaluation.v1"),
     "answer_evaluation_v2": ("answer_evaluation_prompt_v2.md", "answer-evaluation.v2"),
     "answer_evidence_analysis": ("answer_evidence_analysis_prompt.md", "answer-evidence.v1"),

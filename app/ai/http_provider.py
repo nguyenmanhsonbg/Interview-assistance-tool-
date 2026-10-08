@@ -34,6 +34,9 @@ class HttpAIProvider:
     def generate_question_variant(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._call("GENERATE_QUESTION_VARIANT", payload)
 
+    def generate_question_addition(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._call("GENERATE_QUESTION_ADDITION", payload)
+
     def analyze_answer_evidence(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._call("ANALYZE_ANSWER_EVIDENCE", payload)
 
@@ -50,6 +53,7 @@ class HttpAIProvider:
         prompt_key = {
             "GENERATE_QUESTIONS": "question_generation",
             "GENERATE_QUESTION_VARIANT": "question_variant_generation",
+            "GENERATE_QUESTION_ADDITION": "question_addition_generation",
             "ANALYZE_ANSWER_EVIDENCE": "answer_evidence_analysis",
             "SYNTHESIZE_ANSWER_EVALUATION": "answer_evaluation_synthesis",
             "EVALUATE_ASSESSMENT": "answer_evaluation",

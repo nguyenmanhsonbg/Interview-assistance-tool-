@@ -83,6 +83,9 @@ class _UnavailableProvider:
     def generate_question_variant(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._raise()
 
+    def generate_question_addition(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._raise()
+
     def evaluate_answers(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._raise()
 

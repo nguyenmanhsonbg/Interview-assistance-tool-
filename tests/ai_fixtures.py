@@ -26,6 +26,42 @@ def question_variant_payload():
     }
 
 
+def question_addition_payload(target_category="APPLICATION"):
+    source_kind = {
+        "FOUNDATION": "STANDARDIZED",
+        "APPLICATION": "SITUATIONAL",
+        "DEEP_DIVE": "CV_VERIFICATION",
+    }[target_category]
+    return {
+        "schemaVersion": "question-addition.v1",
+        "operation": "GENERATE_QUESTION_ADDITION",
+        "mode": "AUTO_GROUP",
+        "questionSetId": "set-1",
+        "targetCategory": target_category,
+        "question": {
+            "questionText": "Bạn xử lý thế nào khi một thay đổi làm tăng lỗi production?",
+            "competencyKey": "incident_management",
+            "sourceKind": source_kind,
+            "purpose": "Đánh giá khả năng xử lý tình huống thực tế.",
+            "nextStepObjective": "Làm rõ quyết định, trade-off và kết quả.",
+            "questionType": "SCENARIO",
+            "difficulty": "MEDIUM",
+            "expectedEvidence": "Một ví dụ cụ thể, quyết định và kết quả đo được.",
+            "rubric": {
+                "score0": "Không có bằng chứng.",
+                "score1": "Bằng chứng mơ hồ.",
+                "score2": "Có ví dụ nhưng thiếu phân tích.",
+                "score3": "Có ví dụ và giải thích hợp lý.",
+                "score4": "Bằng chứng sâu, có kết quả đo được.",
+            },
+            "isRequired": True,
+            "estimatedSeconds": 100,
+        },
+        "confidence": 0.8,
+        "limitations": [],
+    }
+
+
 def answer_evaluation_payload(answered=True):
     return {
         "schemaVersion": "answer-evaluation.v1",

@@ -26,6 +26,7 @@ _CANONICAL_MODELS = frozenset(DEFAULT_GEMINI_MODELS)
 _OPERATION_CONFIG = {
     "GENERATE_QUESTIONS": "question_generation",
     "GENERATE_QUESTION_VARIANT": "question_variant_generation",
+    "GENERATE_QUESTION_ADDITION": "question_addition_generation",
     "ANALYZE_ANSWER_EVIDENCE": "answer_evidence_analysis",
     "SYNTHESIZE_ANSWER_EVALUATION": "answer_evaluation_synthesis",
     "EVALUATE_ASSESSMENT": "answer_evaluation",
@@ -34,6 +35,7 @@ _OPERATION_CONFIG = {
 _OPERATION_TEMPERATURE = {
     "GENERATE_QUESTIONS": 0.2,
     "GENERATE_QUESTION_VARIANT": 0.2,
+    "GENERATE_QUESTION_ADDITION": 0.2,
     "ANALYZE_ANSWER_EVIDENCE": 0.1,
     "SYNTHESIZE_ANSWER_EVALUATION": 0.1,
     "EVALUATE_ASSESSMENT": 0.1,
@@ -312,9 +314,71 @@ _QUESTION_VARIANT_RESPONSE_SCHEMA = {
         "sourceQuestionId", "variant", "confidence", "limitations",
     ],
 }
+_QUESTION_ADDITION_RESPONSE_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {
+        "schemaVersion": {"type": "STRING", "enum": ["question-addition.v1"]},
+        "operation": {"type": "STRING", "enum": ["GENERATE_QUESTION_ADDITION"]},
+        "mode": {"type": "STRING", "enum": ["USER_PROMPT", "AUTO_GROUP"]},
+        "questionSetId": {"type": "STRING"},
+        "targetCategory": {
+            "type": "STRING",
+            "enum": ["FOUNDATION", "APPLICATION", "DEEP_DIVE"],
+        },
+        "question": {
+            "type": "OBJECT",
+            "properties": {
+                "questionText": {"type": "STRING"},
+                "competencyKey": {"type": "STRING"},
+                "sourceKind": {
+                    "type": "STRING",
+                    "enum": [
+                        "STANDARDIZED", "SITUATIONAL", "CV_VERIFICATION", "GAP_CONFLICT",
+                    ],
+                },
+                "purpose": {"type": "STRING"},
+                "nextStepObjective": {"type": "STRING"},
+                "expectedEvidence": {"type": "STRING"},
+                "questionType": {
+                    "type": "STRING",
+                    "enum": ["SHORT_TEXT", "LONG_TEXT", "SCENARIO"],
+                },
+                "difficulty": {
+                    "type": "STRING",
+                    "enum": ["EASY", "MEDIUM", "HARD"],
+                },
+                "rubric": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "score0": {"type": "STRING"},
+                        "score1": {"type": "STRING"},
+                        "score2": {"type": "STRING"},
+                        "score3": {"type": "STRING"},
+                        "score4": {"type": "STRING"},
+                    },
+                    "required": ["score0", "score1", "score2", "score3", "score4"],
+                },
+                "isRequired": {"type": "BOOLEAN"},
+                "estimatedSeconds": {"type": "INTEGER"},
+            },
+            "required": [
+                "questionText", "competencyKey", "sourceKind", "purpose",
+                "nextStepObjective", "expectedEvidence", "questionType", "difficulty",
+                "rubric", "isRequired", "estimatedSeconds",
+            ],
+        },
+        "confidence": {"type": "NUMBER"},
+        "limitations": {"type": "ARRAY", "items": {"type": "STRING"}},
+    },
+    "required": [
+        "schemaVersion", "operation", "mode", "questionSetId", "targetCategory",
+        "question", "confidence", "limitations",
+    ],
+}
 _OPERATION_RESPONSE_SCHEMAS = {
     "GENERATE_QUESTIONS": _QUESTION_GENERATION_RESPONSE_SCHEMA,
     "GENERATE_QUESTION_VARIANT": _QUESTION_VARIANT_RESPONSE_SCHEMA,
+    "GENERATE_QUESTION_ADDITION": _QUESTION_ADDITION_RESPONSE_SCHEMA,
     "ANALYZE_ANSWER_EVIDENCE": _EVIDENCE_RESPONSE_SCHEMA,
     "SYNTHESIZE_ANSWER_EVALUATION": _EVALUATION_RESPONSE_SCHEMA,
 }
@@ -373,6 +437,9 @@ class GeminiAIProvider:
 
     def generate_question_variant(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._call("GENERATE_QUESTION_VARIANT", payload)
+
+    def generate_question_addition(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._call("GENERATE_QUESTION_ADDITION", payload)
 
     def analyze_answer_evidence(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._call("ANALYZE_ANSWER_EVIDENCE", payload)

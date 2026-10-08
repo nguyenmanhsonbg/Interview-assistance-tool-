@@ -61,6 +61,25 @@ class AIProviderTests(unittest.TestCase):
         self.assertEqual("question-variant.v1", captured[0]["promptVersion"])
         self.assertEqual("question-variant.v1", result["schemaVersion"])
 
+    def test_http_provider_sends_question_addition_operation_and_prompt_metadata(self):
+        from app.ai.http_provider import HttpAIProvider
+
+        captured = []
+
+        def opener(request, timeout):
+            captured.append(json.loads(request.data.decode("utf-8")))
+            return FakeResponse(b'{"schemaVersion":"question-addition.v1"}')
+
+        provider = HttpAIProvider(
+            "https://ai.example.test/v1", api_key=None, model="model-1",
+            opener=opener, sleep=lambda _: None,
+        )
+        result = provider.generate_question_addition({"targetCategory": "APPLICATION"})
+
+        self.assertEqual("GENERATE_QUESTION_ADDITION", captured[0]["operation"])
+        self.assertEqual("question-addition.v1", captured[0]["promptVersion"])
+        self.assertEqual("question-addition.v1", result["schemaVersion"])
+
     def test_retryable_500_is_retried_once_but_400_is_not(self):
         from app.ai.http_provider import HttpAIProvider
         from app.ai.provider import ProviderError

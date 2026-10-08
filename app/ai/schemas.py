@@ -18,6 +18,9 @@ _SCHEMA_FILES = {
     "QUESTION_VARIANT": {
         "question-variant.v1": "question-variant.v1.schema.json",
     },
+    "QUESTION_ADDITION": {
+        "question-addition.v1": "question-addition.v1.schema.json",
+    },
     "FOLLOW_UP": {"follow-up.v1": "follow_up_question.schema.json"},
 }
 
@@ -60,6 +63,8 @@ class SchemaRegistry:
             _validate_evaluation_rules(payload, context or {})
         elif operation == "QUESTION_VARIANT":
             _validate_question_variant_rules(payload, context or {})
+        elif operation == "QUESTION_ADDITION":
+            _validate_question_addition_rules(payload, context or {})
         elif operation == "FOLLOW_UP":
             _validate_follow_up_rules(payload, context or {})
         return payload
@@ -83,6 +88,23 @@ def validate_question_variant(
         context={
             "questionSetId": question_set_id,
             "sourceQuestionId": source_question_id,
+        },
+    )
+
+
+def validate_question_addition(
+    payload: Any,
+    *,
+    question_set_id: str | None = None,
+    target_category: str | None = None,
+) -> dict[str, Any]:
+    root = Path(__file__).resolve().parents[2] / "schemas"
+    return SchemaRegistry(root).validate(
+        "QUESTION_ADDITION",
+        payload,
+        context={
+            "questionSetId": question_set_id,
+            "targetCategory": target_category,
         },
     )
 
@@ -255,6 +277,27 @@ def _validate_question_variant_rules(
         and payload["sourceQuestionId"] != expected_source_question_id
     ):
         raise ValidationError("AI question variant references an unknown source question")
+
+
+def _validate_question_addition_rules(
+    payload: dict[str, Any], context: dict[str, Any]
+) -> None:
+    expected_question_set_id = context.get("questionSetId")
+    expected_category = context.get("targetCategory")
+    if (
+        expected_question_set_id is not None
+        and payload["questionSetId"] != expected_question_set_id
+    ):
+        raise ValidationError("AI question addition references an unknown question set")
+    if expected_category is not None and payload["targetCategory"] != expected_category:
+        raise ValidationError("AI question addition category does not match the target group")
+    allowed_sources = {
+        "FOUNDATION": {"STANDARDIZED"},
+        "APPLICATION": {"SITUATIONAL"},
+        "DEEP_DIVE": {"CV_VERIFICATION", "GAP_CONFLICT"},
+    }
+    if payload["question"]["sourceKind"] not in allowed_sources[payload["targetCategory"]]:
+        raise ValidationError("AI question addition sourceKind does not match targetCategory")
 
 
 def _normalize_question(value: str) -> str:

@@ -1,0 +1,43 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {"const": "question-addition.v1"},
+    "operation": {"const": "GENERATE_QUESTION_ADDITION"},
+    "mode": {"type": "string", "enum": ["USER_PROMPT", "AUTO_GROUP"]},
+    "questionSetId": {"type": "string", "minLength": 1},
+    "targetCategory": {"type": "string", "enum": ["FOUNDATION", "APPLICATION", "DEEP_DIVE"]},
+    "question": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "questionText": {"type": "string", "minLength": 1, "maxLength": 4000},
+        "competencyKey": {"type": "string", "minLength": 1, "maxLength": 200},
+        "sourceKind": {"type": "string", "enum": ["STANDARDIZED", "SITUATIONAL", "CV_VERIFICATION", "GAP_CONFLICT"]},
+        "purpose": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "nextStepObjective": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "questionType": {"type": "string", "enum": ["SHORT_TEXT", "LONG_TEXT", "SCENARIO"]},
+        "difficulty": {"type": "string", "enum": ["EASY", "MEDIUM", "HARD"]},
+        "expectedEvidence": {"type": "string", "minLength": 1, "maxLength": 4000},
+        "rubric": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "score0": {"type": "string", "minLength": 1, "maxLength": 2000},
+            "score1": {"type": "string", "minLength": 1, "maxLength": 2000},
+            "score2": {"type": "string", "minLength": 1, "maxLength": 2000},
+            "score3": {"type": "string", "minLength": 1, "maxLength": 2000},
+            "score4": {"type": "string", "minLength": 1, "maxLength": 2000}
+          },
+          "required": ["score0", "score1", "score2", "score3", "score4"]
+        },
+        "isRequired": {"type": "boolean"},
+        "estimatedSeconds": {"type": "integer", "minimum": 1, "maximum": 900}
+      },
+      "required": ["questionText", "competencyKey", "sourceKind", "purpose", "nextStepObjective", "questionType", "difficulty", "expectedEvidence", "rubric", "isRequired", "estimatedSeconds"]
+    },
+    "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+    "limitations": {"type": "array", "maxItems": 10, "items": {"type": "string", "maxLength": 1000}}
+  },
+  "required": ["schemaVersion", "operation", "mode", "questionSetId", "targetCategory", "question", "confidence", "limitations"]
+}
