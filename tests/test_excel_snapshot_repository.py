@@ -51,7 +51,7 @@ class ExcelSnapshotRepositoryTests(MigratedDatabaseFixture, unittest.TestCase):
             "assessment_snapshot_questions",
             "assessment_snapshot_answers",
         }.issubset(tables))
-        self.assertEqual([1, 2, 3, 4, 5, 6, 7], versions)
+        self.assertEqual([1, 2, 3, 4, 5, 6, 7, 8], versions)
 
     def test_snapshot_round_trip_preserves_edited_questions_and_answer_hashes(self):
         from app.repositories.assessment_snapshots import AssessmentSnapshotRepository

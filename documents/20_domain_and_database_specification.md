@@ -384,7 +384,7 @@ Task RUNNING khi restart phải được recovery thành FAILED hoặc PENDING_R
 | source_question_id | TEXT | Y | NULL | Logical source question reference | Câu hỏi nguồn khi là variant |
 | assessment_snapshot_id | TEXT | Y | NULL | FK assessment_snapshots(id), ON DELETE CASCADE | Snapshot nếu có |
 | result_type | TEXT | N | — | CHECK QUESTION_GENERATION/QUESTION_VARIANT/ANSWER_EVALUATION/INTERVIEW_BRIEF/FOLLOW_UP | Loại output |
-| version_no | INTEGER | N | 1 | CHECK > 0; UNIQUE(case, type, version) | Version result |
+| version_no | INTEGER | N | 1 | CHECK > 0; UNIQUE(case, type, version) for non-variant results; UNIQUE(case, type, question set, source question, version) for `QUESTION_VARIANT` | Version result |
 | supersedes_result_id | TEXT | Y | NULL | FK ai_results(id), ON DELETE SET NULL | Result cũ |
 | payload_json | TEXT | N | — | JSON object đã validate | Output đầy đủ |
 | confidence | REAL | Y | NULL | CHECK 0.0 <= confidence AND confidence <= 1.0 | Confidence AI |

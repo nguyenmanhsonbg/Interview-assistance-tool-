@@ -123,6 +123,30 @@ class QuestionVariantTests(MigratedDatabaseFixture, unittest.TestCase):
             self._latest_audit_action(),
         )
 
+    def test_multiple_question_slots_can_materialize_variants_with_independent_versions(self):
+        service = self.make_service()
+
+        first_task = service.request_variant(
+            self.case["id"], "set-1", "question-1", "SAME_GROUP",
+            None, "same-group-question-1-key",
+        )
+        first = service.process(first_task["id"], VariantProvider())
+
+        second_task = service.request_variant(
+            self.case["id"], "set-1", "question-2", "SAME_GROUP",
+            None, "same-group-question-2-key",
+        )
+        second_result = question_variant_payload()
+        second_result["mode"] = "SAME_GROUP"
+        second_result["sourceQuestionId"] = "question-2"
+        second = service.process(second_task["id"], VariantProvider(result=second_result))
+
+        self.assertEqual("COMPLETED", first["status"])
+        self.assertEqual("COMPLETED", second["status"])
+        self.assertEqual(1, first["result"]["versionNo"])
+        self.assertEqual(1, second["result"]["versionNo"])
+        self.assertNotEqual(first["result"]["id"], second["result"]["id"])
+
     def test_provider_failure_keeps_question_and_proposal_absent(self):
         service = self.make_service()
         task = service.request_variant(

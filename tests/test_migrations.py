@@ -21,7 +21,7 @@ class MigrationTests(unittest.TestCase):
         from app.migrations import MigrationRunner
 
         runner = MigrationRunner(self.database, self.migrations)
-        self.assertEqual([1, 2, 3, 4, 5, 6, 7], runner.apply_all())
+        self.assertEqual([1, 2, 3, 4, 5, 6, 7, 8], runner.apply_all())
         self.assertEqual([], runner.apply_all())
 
         with self.database.connection() as connection:
@@ -50,7 +50,7 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual("9", settings["assessment.default_question_count"])
         self.assertEqual("9", settings["assessment.max_question_count"])
         self.assertEqual("MANUAL_ONLY", settings["retention.mode"])
-        self.assertEqual([1, 2, 3, 4, 5, 6, 7], [row[0] for row in versions])
+        self.assertEqual([1, 2, 3, 4, 5, 6, 7, 8], [row[0] for row in versions])
 
         with self.database.connection() as connection:
             columns = {
@@ -92,6 +92,12 @@ class MigrationTests(unittest.TestCase):
                     id, question_set_id, display_order, question_text,
                     competency_key, source_kind, purpose, expected_evidence
                 ) VALUES ('q1', 'set', 1, 'Question', 'skill', 'MANUAL', 'purpose', 'evidence')"""
+            )
+            connection.execute(
+                """INSERT INTO questions(
+                    id, question_set_id, display_order, question_text,
+                    competency_key, source_kind, purpose, expected_evidence
+                ) VALUES ('q2', 'set', 2, 'Question 2', 'skill', 'MANUAL', 'purpose', 'evidence')"""
             )
             connection.execute(
                 """INSERT INTO ai_tasks(
@@ -181,6 +187,28 @@ class MigrationTests(unittest.TestCase):
             )
 
         self.assertEqual([], runner.apply_all())
+
+        shutil.copy2(
+            self.migrations / "008_scope_question_variant_versions.sql",
+            migration_copy / "008_scope_question_variant_versions.sql",
+        )
+        self.assertEqual([8], runner.apply_all())
+
+        with self.database.transaction() as connection:
+            connection.execute(
+                """INSERT INTO ai_tasks(
+                    id, interview_case_id, task_type, idempotency_key,
+                    input_fingerprint, source_question_id
+                ) VALUES ('variant-task-2', 'case', 'GENERATE_QUESTION_VARIANT', 'variant-idem-2', ?, 'q2')""",
+                ("d" * 64,),
+            )
+            connection.execute(
+                """INSERT INTO ai_results(
+                    id, ai_task_id, interview_case_id, question_set_id,
+                    source_question_id, result_type, payload_json
+                ) VALUES ('variant-result-2', 'variant-task-2', 'case', 'set', 'q2',
+                    'QUESTION_VARIANT', '{}')"""
+            )
 
     def test_question_and_answer_lock_triggers_enforce_immutable_snapshots(self):
         from app.migrations import MigrationRunner
