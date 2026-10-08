@@ -15,6 +15,7 @@ from app.domain.rules import MAX_ADDITION_PROMPT_CHARS
 from app.repositories.audit import append_audit
 from app.repositories.question_additions import QuestionAdditionRepository
 from app.services.ai_task_service import AITaskService
+from app.services.question_service import _insert_questions, _validate_questions
 
 
 _MODES = {"USER_PROMPT", "AUTO_GROUP"}
@@ -248,36 +249,135 @@ class QuestionAdditionService:
                 )
         return self.get_proposal(case_id, question_set_id, proposal_id)
 
+    def apply_proposal(
+        self,
+        case_id: str,
+        question_set_id: str,
+        proposal_id: str,
+        expected_question_set_updated_at: str,
+        expected_source_fingerprint: str,
+    ) -> dict[str, Any]:
+        with self.database.transaction() as connection:
+            question_set = self._lock_check(connection, case_id, question_set_id)
+            if question_set["updated_at"] != expected_question_set_updated_at:
+                raise StateConflict("Question addition proposal is stale")
+            source = self._source_from_connection(connection, case_id, question_set_id)
+            current_fingerprint = _fingerprint(source["sourceFingerprintInput"])
+            if current_fingerprint != expected_source_fingerprint:
+                raise StateConflict("Question addition proposal source is stale")
+            proposal = connection.execute(
+                """SELECT p.*, r.payload_json
+                   FROM question_addition_proposals p
+                   JOIN ai_results r ON r.id=p.ai_result_id
+                   WHERE p.id=? AND p.interview_case_id=? AND p.question_set_id=?""",
+                (proposal_id, case_id, question_set_id),
+            ).fetchone()
+            if proposal is None:
+                raise ResourceNotFound("Question addition proposal not found")
+            if proposal["status"] != "PROPOSED":
+                raise StateConflict("Question addition proposal is no longer proposed")
+            payload = json.loads(proposal["payload_json"])
+            self.tasks.schemas.validate(
+                "QUESTION_ADDITION",
+                payload,
+                context={
+                    "questionSetId": question_set_id,
+                    "targetCategory": proposal["target_category"],
+                },
+            )
+            if payload["mode"] != proposal["mode"]:
+                raise ValidationError("Question addition proposal mode does not match task")
+            questions = source["existingQuestions"]
+            if len(questions) >= 30:
+                raise StateConflict("Question Set cannot contain more than 30 questions")
+            addition = payload["question"]
+            new_question = {
+                "id": str(uuid.uuid4()),
+                "displayOrder": len(questions) + 1,
+                "questionText": addition["questionText"],
+                "competencyKey": addition["competencyKey"],
+                "sourceKind": addition["sourceKind"],
+                "questionCategory": proposal["target_category"],
+                "purpose": addition["purpose"],
+                "nextStepObjective": addition["nextStepObjective"],
+                "questionType": addition["questionType"],
+                "difficulty": addition["difficulty"],
+                "expectedEvidence": addition["expectedEvidence"],
+                "rubric": addition["rubric"],
+                "isRequired": addition["isRequired"],
+                "estimatedSeconds": addition["estimatedSeconds"],
+            }
+            normalized = _validate_questions(
+                questions + [new_question], allow_expanded=True
+            )
+            _insert_questions(connection, question_set_id, [normalized[-1]])
+            connection.execute(
+                """UPDATE question_sets
+                   SET updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                   WHERE id=?""",
+                (question_set_id,),
+            )
+            self.repository.mark_applied(
+                connection,
+                case_id=case_id,
+                question_set_id=question_set_id,
+                proposal_id=proposal_id,
+                question_id=new_question["id"],
+            )
+            append_audit(
+                connection,
+                actor_type="COMMITTEE",
+                action="QUESTION_ADDITION_APPLIED",
+                entity_type="QUESTION_ADDITION_PROPOSAL",
+                entity_id=proposal_id,
+                metadata={
+                    "questionSetId": question_set_id,
+                    "questionId": new_question["id"],
+                    "targetCategory": proposal["target_category"],
+                    "questionCount": len(normalized),
+                    "sourceFingerprint": expected_source_fingerprint,
+                },
+            )
+        return {
+            "question": new_question,
+            "proposal": self.get_proposal(case_id, question_set_id, proposal_id),
+        }
+
     def _load_source(self, case_id: str, question_set_id: str) -> dict[str, Any]:
         with self.database.connection() as connection:
-            row = connection.execute(
-                """SELECT qs.id, qs.status, qs.updated_at, qs.interview_case_id
-                   FROM question_sets qs
-                   WHERE qs.id=? AND qs.interview_case_id=?""",
-                (question_set_id, case_id),
-            ).fetchone()
-            if row is None:
-                raise ResourceNotFound("Question Set not found")
-            self._assert_unlocked(connection, case_id, row["status"])
-            documents = [
-                dict(document)
-                for document in connection.execute(
-                    """SELECT id, document_type, version_no, content_sha256
-                       FROM documents
-                       WHERE interview_case_id=? AND is_current=1 AND is_ai_eligible=1
-                       ORDER BY document_type""",
-                    (case_id,),
-                ).fetchall()
-            ]
-            if {document["document_type"] for document in documents} != {"JD", "CV"}:
-                raise StateConflict("Confirmed current JD and CV are required")
-            questions = [
-                _question_from_row(question)
-                for question in connection.execute(
-                    "SELECT * FROM questions WHERE question_set_id=? ORDER BY display_order",
-                    (question_set_id,),
-                ).fetchall()
-            ]
+            return self._source_from_connection(connection, case_id, question_set_id)
+
+    def _source_from_connection(
+        self, connection, case_id: str, question_set_id: str
+    ) -> dict[str, Any]:
+        row = connection.execute(
+            """SELECT qs.id, qs.status, qs.updated_at, qs.interview_case_id
+               FROM question_sets qs
+               WHERE qs.id=? AND qs.interview_case_id=?""",
+            (question_set_id, case_id),
+        ).fetchone()
+        if row is None:
+            raise ResourceNotFound("Question Set not found")
+        self._assert_unlocked(connection, case_id, row["status"])
+        documents = [
+            dict(document)
+            for document in connection.execute(
+                """SELECT id, document_type, version_no, content_sha256
+                   FROM documents
+                   WHERE interview_case_id=? AND is_current=1 AND is_ai_eligible=1
+                   ORDER BY document_type""",
+                (case_id,),
+            ).fetchall()
+        ]
+        if {document["document_type"] for document in documents} != {"JD", "CV"}:
+            raise StateConflict("Confirmed current JD and CV are required")
+        questions = [
+            _question_from_row(question)
+            for question in connection.execute(
+                "SELECT * FROM questions WHERE question_set_id=? ORDER BY display_order",
+                (question_set_id,),
+            ).fetchall()
+        ]
         source_fingerprint_input = {
             "questionSetId": question_set_id,
             "questionSetUpdatedAt": row["updated_at"],
@@ -293,7 +393,7 @@ class QuestionAdditionService:
 
     def _lock_check(self, connection, case_id: str, question_set_id: str):
         row = connection.execute(
-            """SELECT id, status FROM question_sets
+            """SELECT id, status, updated_at FROM question_sets
                WHERE id=? AND interview_case_id=?""",
             (question_set_id, case_id),
         ).fetchone()

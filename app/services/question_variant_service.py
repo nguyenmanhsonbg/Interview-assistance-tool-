@@ -260,7 +260,7 @@ class QuestionVariantService:
                     "rubric": payload["variant"]["rubric"],
                 }
             )
-            _validate_questions(current_questions)
+            _validate_questions(current_questions, allow_expanded=True)
             connection.execute(
                 """UPDATE questions SET question_text=?, purpose=?, next_step_objective=?,
                    expected_evidence=?, rubric_json=? WHERE id=? AND question_set_id=?""",

@@ -226,6 +226,150 @@ class QuestionAdditionTests(MigratedDatabaseFixture, unittest.TestCase):
             [tuple(row) for row in rows],
         )
 
+    def test_apply_appends_question_and_preserves_existing_questions(self):
+        from app.repositories.questions import QuestionRepository
+
+        service = self.make_service()
+        task = service.request_addition(
+            self.case["id"], "set-1", "APPLICATION", "AUTO_GROUP", None, "apply-key",
+        )
+        processed = service.process(task["id"], AdditionProvider())
+        before = QuestionRepository(self.database).get_set("set-1")
+        before_questions = {
+            question["id"]: question for question in before["questions"]
+        }
+
+        applied = service.apply_proposal(
+            self.case["id"], "set-1", processed["proposalId"], before["updatedAt"],
+            processed["proposal"]["sourceFingerprint"],
+        )
+
+        self.assertEqual(10, applied["question"]["displayOrder"])
+        self.assertEqual("APPLICATION", applied["question"]["questionCategory"])
+        self.assertEqual("APPLIED", applied["proposal"]["status"])
+        self.assertEqual(applied["question"]["id"], applied["proposal"]["appliedQuestionId"])
+        after = QuestionRepository(self.database).get_set("set-1")
+        self.assertEqual(10, len(after["questions"]))
+        for question in after["questions"][:9]:
+            self.assertEqual(before_questions[question["id"]], question)
+        self.assertEqual("QUESTION_ADDITION_APPLIED", self._latest_audit_action())
+        with self.database.connection() as connection:
+            audit = connection.execute(
+                "SELECT metadata_json FROM audit_logs WHERE action='QUESTION_ADDITION_APPLIED'"
+            ).fetchone()[0]
+        self.assertNotIn("raw phone", audit)
+        self.assertNotIn("prompt", audit)
+
+    def test_apply_rejects_stale_proposal_and_rolls_back(self):
+        from app.domain.errors import StateConflict
+        from app.repositories.questions import QuestionRepository
+        from app.services.question_service import QuestionService
+
+        service = self.make_service()
+        task = service.request_addition(
+            self.case["id"], "set-1", "APPLICATION", "AUTO_GROUP", None, "stale-key",
+        )
+        processed = service.process(task["id"], AdditionProvider())
+        before = QuestionRepository(self.database).get_set("set-1")
+        edited = before["questions"]
+        edited[0]["questionText"] = "Manual edit wins"
+        QuestionService(self.database).update_draft("set-1", edited)
+
+        with self.assertRaises(StateConflict):
+            service.apply_proposal(
+                self.case["id"], "set-1", processed["proposalId"], before["updatedAt"],
+                processed["proposal"]["sourceFingerprint"],
+            )
+        self.assertEqual(9, self._question_count())
+        self.assertEqual(
+            "PROPOSED",
+            service.get_proposal(self.case["id"], "set-1", processed["proposalId"])["status"],
+        )
+
+    def test_discard_is_idempotent_and_never_inserts(self):
+        service = self.make_service()
+        task = service.request_addition(
+            self.case["id"], "set-1", "APPLICATION", "AUTO_GROUP", None, "discard-key",
+        )
+        processed = service.process(task["id"], AdditionProvider())
+
+        discarded = service.discard_proposal(
+            self.case["id"], "set-1", processed["proposalId"]
+        )
+        repeated = service.discard_proposal(
+            self.case["id"], "set-1", processed["proposalId"]
+        )
+
+        self.assertEqual("DISCARDED", discarded["status"])
+        self.assertEqual("DISCARDED", repeated["status"])
+        self.assertEqual(9, self._question_count())
+        self.assertEqual("QUESTION_ADDITION_DISCARDED", self._latest_audit_action())
+
+    def test_apply_rejects_corrupt_payload_and_locked_or_duplicate_proposals(self):
+        from app.domain.errors import StateConflict, ValidationError
+        from app.repositories.questions import QuestionRepository
+
+        service = self.make_service()
+        task = service.request_addition(
+            self.case["id"], "set-1", "APPLICATION", "AUTO_GROUP", None, "corrupt-key",
+        )
+        processed = service.process(task["id"], AdditionProvider())
+        before = QuestionRepository(self.database).get_set("set-1")
+        with self.database.transaction() as connection:
+            connection.execute(
+                "UPDATE ai_results SET payload_json=? WHERE id=?",
+                ('{"schemaVersion":"question-addition.v1"}', processed["result"]["id"]),
+            )
+        with self.assertRaises(ValidationError):
+            service.apply_proposal(
+                self.case["id"], "set-1", processed["proposalId"], before["updatedAt"],
+                processed["proposal"]["sourceFingerprint"],
+            )
+        self.assertEqual(9, self._question_count())
+
+        valid_task = service.request_addition(
+            self.case["id"], "set-1", "APPLICATION", "AUTO_GROUP", None, "lock-key",
+        )
+        valid = service.process(valid_task["id"], AdditionProvider())
+        with self.database.transaction() as connection:
+            connection.execute("UPDATE question_sets SET status='APPROVED' WHERE id='set-1'")
+        with self.assertRaises(StateConflict):
+            service.apply_proposal(
+                self.case["id"], "set-1", valid["proposalId"], before["updatedAt"],
+                valid["proposal"]["sourceFingerprint"],
+            )
+
+    def test_apply_at_maximum_count_is_rejected_without_mutation(self):
+        from app.domain.errors import StateConflict
+        from app.repositories.questions import QuestionRepository
+        from app.services.question_service import QuestionService
+
+        current = QuestionRepository(self.database).get_set("set-1")["questions"]
+        for number in range(10, 31):
+            source = current[(number - 1) % len(current)].copy()
+            source["id"] = f"question-{number}"
+            source["displayOrder"] = number
+            source["questionText"] = f"Question {number}"
+            current.append(source)
+        QuestionService(self.database).update_draft("set-1", current)
+        service = self.make_service()
+        task = service.request_addition(
+            self.case["id"], "set-1", "APPLICATION", "AUTO_GROUP", None, "max-key",
+        )
+        processed = service.process(task["id"], AdditionProvider())
+        before = QuestionRepository(self.database).get_set("set-1")
+
+        with self.assertRaises(StateConflict):
+            service.apply_proposal(
+                self.case["id"], "set-1", processed["proposalId"], before["updatedAt"],
+                processed["proposal"]["sourceFingerprint"],
+            )
+        self.assertEqual(30, self._question_count())
+        self.assertEqual(
+            "PROPOSED",
+            service.get_proposal(self.case["id"], "set-1", processed["proposalId"])["status"],
+        )
+
     def _question_count(self):
         with self.database.connection() as connection:
             return connection.execute(
