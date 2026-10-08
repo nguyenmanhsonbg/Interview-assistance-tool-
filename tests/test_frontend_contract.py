@@ -211,6 +211,7 @@ class FrontendContractTests(unittest.TestCase):
 
         self.assertIn("const rememberedSelection = getState().selectedQuestion;", scripts)
         self.assertIn("setState({ selectedQuestion: { caseId, questionId: selectedId } });", scripts)
+        self.assertIn("let restoreFocusId = selectedId;", scripts)
 
     def test_two_pass_evaluation_progress_preserves_previous_result_provenance(self):
         root = Path(__file__).resolve().parents[1] / "web"

@@ -1235,7 +1235,7 @@ function renderQuestionWorkspace(questionSet, caseId, onRefresh, assessmentStart
     ? rememberedSelection.questionId
     : questions[0]?.id;
   if (selectedId) setState({ selectedQuestion: { caseId, questionId: selectedId } });
-  let restoreFocusId = null;
+  let restoreFocusId = selectedId;
   const redraw = () => {
     master.replaceChildren();
     for (const group of questionGroups(questions)) {
