@@ -124,6 +124,7 @@ class HtmlCandidatePackageServiceTests(MigratedDatabaseFixture, unittest.TestCas
         self.assertEqual(first["id"], replay["id"])
         self.assertEqual(2, second["versionNo"])
         self.assertNotEqual(first["id"], second["id"])
+        self.assertEqual(second["id"], service.get_snapshot(self.case["id"])["id"])
         with self.assertRaises(StateConflict):
             service.import_response(
                 self.case["id"], _response_html(exported.content, answer_text="Second"),

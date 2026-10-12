@@ -85,6 +85,12 @@ Script tải Python embeddable 64-bit chính thức, kiểm tra SHA-256, chạy 
 
 - `release/ClawCV-0.1.0-win64-portable.zip`
 - `release/ClawCV-0.1.0-win64-portable.zip.sha256`
+- `release/ClawCV-0.1.0-win64.exe`
+- `release/ClawCV-0.1.0-win64.exe.sha256`
+
+The `.exe` is a self-extracting launcher for the same portable bundle. It extracts
+the runtime to a temporary directory, starts `start.bat`, and keeps application
+data under `%LOCALAPPDATA%\ClawCV`.
 
 Máy pilot không cần cài Python, Node.js, Docker hoặc database server.
 

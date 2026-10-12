@@ -171,8 +171,8 @@ function showError(error, host = mainElement()) {
 function renderAppShell(activeHref = "") {
   const shell = element("div", undefined, "workspace-shell");
   const sidebar = element("aside", undefined, "sidebar");
-  const brand = link("ClawCV", "#/cases", "brand");
-  brand.append(element("span", "Interview Assistant", "brand-subtitle"));
+  const brand = link("VCS", "#/cases", "brand");
+  brand.append(element("span", "Interview Asistant", "brand-subtitle"));
   sidebar.append(brand);
 
   const nav = element("nav", undefined, "sidebar-nav");
@@ -221,7 +221,7 @@ function renderAuthentication(pinConfigured) {
   shell.id = "main-content";
   shell.tabIndex = -1;
   const card = element("section", undefined, "auth-card stack");
-  card.append(element("span", "ClawCV", "brand-name"));
+  card.append(element("span", "VCS", "brand-name"));
   card.append(element("h1", pinConfigured ? "Mở Committee Mode" : "Thiết lập Committee PIN"));
   card.append(element("p", "Phiên làm việc chỉ chạy trên máy local và không lưu PIN trong trình duyệt.", "muted"));
   const form = element("form", undefined, "stack");
@@ -679,7 +679,7 @@ function renderTextFileImport(caseId, type) {
 
 function buildDocumentCard(caseId, type, current) {
   const card = element("section", undefined, "card stack");
-  const title = type === "JD" ? "Job Description" : "Curriculum Vitae";
+  const title = type === "JD" ? "Job Description" : "CV";
   card.append(element("h2", title), element("p", type === "JD" ? "Nguồn yêu cầu của vị trí." : "Nguồn kinh nghiệm và bằng chứng của ứng viên.", "muted"));
   const fullText = current?.extractedText || "";
   if (current) {
@@ -704,7 +704,7 @@ function buildDocumentCard(caseId, type, current) {
   if (type === "CV") {
     const pdf = field("Import CV PDF", "cvPdf", { type: "file" });
     pdf.input.accept = ".pdf,application/pdf";
-    const importPdf = button("Đọc và import CV PDF", async () => {
+    const importPdf = button("Import file CV PDF", async () => {
       const file = pdf.input.files?.[0];
       if (!file) throw new Error("Hãy chọn file CV PDF");
       if (!file.name.toLowerCase().endsWith(".pdf") || (file.type && file.type !== "application/pdf")) {
@@ -1109,7 +1109,6 @@ function renderQuestionAdditionFields(question) {
   const fields = element("div", undefined, "question-addition-fields");
   for (const [label, value] of [
     ["Mục đích", question?.purpose],
-    ["Mục tiêu bước tiếp theo", question?.nextStepObjective],
     ["Bằng chứng cần tìm", question?.expectedEvidence],
   ]) {
     const row = element("div", undefined, "detail-row");
@@ -1430,7 +1429,6 @@ function renderVariantFields(variant) {
   const fields = element("div", undefined, "question-variant-fields");
   for (const [label, value] of [
     ["Mục đích", variant?.purpose],
-    ["Mục tiêu bước tiếp theo", variant?.nextStepObjective],
     ["Bằng chứng cần tìm", variant?.expectedEvidence],
   ]) {
     const row = element("div", undefined, "detail-row");
@@ -1560,20 +1558,23 @@ function loadQuestionVariantState(host, question, questionSet, caseId, onRefresh
     .catch((error) => showError(error, host));
 }
 
+function questionTypeLabel(questionType) {
+  return {
+    LONG_TEXT: "Tự luận",
+    MULTI_CHOICE: "Chọn đáp án",
+  }[questionType] || questionType;
+}
+
 function renderQuestionDetail(question, questionSet, caseId, onRefresh, assessmentStarted = false) {
   const detail = element("section", undefined, "card detail-panel stack");
   detail.append(element("h2", safeText(question.displayOrder) + ". " + safeText(question.questionText)));
   const rows = [
     ["Năng lực", question.competencyKey],
-    ["Nguồn", question.sourceKind],
     ["Nhóm", categoryLabel(question.questionCategory)],
-    ["Loại câu hỏi", question.questionType],
+    ["Loại câu hỏi", questionTypeLabel(question.questionType)],
     ["Độ khó", question.difficulty],
     ["Mục đích", question.purpose],
-    ["Mục tiêu bước tiếp theo", question.nextStepObjective],
     ["Bằng chứng cần tìm", question.expectedEvidence],
-    ["Bắt buộc", question.isRequired ? "Có" : "Không"],
-    ["Thời lượng ước tính", formatDuration(question.estimatedSeconds)],
   ];
   for (const [label, value] of rows) {
     const row = element("div", undefined, "detail-row");
@@ -1886,50 +1887,32 @@ function renderSnapshotWorkspace(snapshot) {
   const section = element("section", undefined, "card stack");
   const summary = element("div", undefined, "actions");
   const answered = [...answersByQuestion.values()].filter((answer) => answer.isAnswered).length;
-  summary.append(element("span", "Snapshot v" + snapshot.versionNo, "badge"), element("span", answered + "/" + questions.length + " câu đã trả lời", "badge"), element("span", safeText(snapshot.refinedFlowStatus), "badge"));
+  summary.append(element("span", "Snapshot v" + snapshot.versionNo + " · Bản chính", "badge success"), element("span", answered + "/" + questions.length + " câu đã trả lời", "badge"), element("span", safeText(snapshot.refinedFlowStatus), "badge"));
   section.append(summary);
-  const tableWrap = element("div", undefined, "table-wrap");
-  const table = document.createElement("table");
-  const head = document.createElement("thead");
-  const headRow = document.createElement("tr");
-  for (const label of ["#", "Câu hỏi", "Trạng thái", "Câu trả lời"]) headRow.append(element("th", label));
-  head.append(headRow);
-  const body = document.createElement("tbody");
-  let selectedId = questions[0]?.questionId;
-  const detail = element("div", undefined, "answer-detail");
-  const redraw = () => {
-    body.replaceChildren();
-    for (const question of questions) {
-      const answer = answersByQuestion.get(question.questionId) || { answerText: "", isAnswered: false, assessmentStatus: "NOT_ASSESSED" };
-      const row = document.createElement("tr");
-      const buttonCell = document.createElement("td");
-      const select = button(String(question.displayOrder), () => { selectedId = question.questionId; redraw(); }, "link-button");
-      select.setAttribute("aria-selected", selectedId === question.questionId ? "true" : "false");
-      buttonCell.append(select);
-      row.append(buttonCell, element("td", question.questionText), element("td", undefined), element("td", answer.answerText || "Chưa có câu trả lời"));
-      row.children[2].append(element("span", answer.isAnswered ? "ANSWERED" : "NOT_ASSESSED", "badge " + (answer.isAnswered ? "success" : "warning")));
-      body.append(row);
-    }
-    const question = questions.find((item) => item.questionId === selectedId) || questions[0];
-    const answer = question ? answersByQuestion.get(question.questionId) || { answerText: "", isAnswered: false, assessmentStatus: "NOT_ASSESSED" } : null;
-    detail.replaceChildren();
-    if (!question) {
-      detail.append(element("p", "Snapshot chưa có câu hỏi.", "muted"));
-      return;
-    }
-    detail.append(element("h2", question.displayOrder + ". " + question.questionText));
+  const questionList = element("div", undefined, "answer-question-list");
+  for (const [index, question] of questions.entries()) {
+    const answer = answersByQuestion.get(question.questionId) || { answerText: "", isAnswered: false, assessmentStatus: "NOT_ASSESSED" };
+    const questionDetails = document.createElement("details");
+    questionDetails.className = "card answer-question-collapse";
+    questionDetails.open = index === 0;
+    const questionSummary = document.createElement("summary");
+    questionSummary.className = "answer-question-summary";
+    const title = element("span", undefined, "answer-question-title");
+    title.append(element("strong", question.displayOrder + ". " + question.questionText));
+    const meta = element("span", undefined, "answer-question-meta");
+    meta.append(element("span", answer.isAnswered ? "ANSWERED" : "NOT_ASSESSED", "badge " + (answer.isAnswered ? "success" : "warning")));
+    questionSummary.append(title, meta);
+    questionDetails.append(questionSummary);
     const columns = element("div", undefined, "answer-columns");
     const original = element("section", undefined, "stack");
     original.append(element("h3", "Nội dung question/rubric"), element("p", question.expectedEvidence, "muted"), renderRubric(question.rubric));
     const answerCard = element("section", undefined, "stack");
     answerCard.append(element("h3", "Câu trả lời đã import"), element("span", answer.isAnswered ? "ANSWERED" : "NOT_ASSESSED", "badge " + (answer.isAnswered ? "success" : "warning")), element("div", answer.answerText || "Chưa có câu trả lời", "answer-text"));
     columns.append(original, answerCard);
-    detail.append(columns);
-  };
-  redraw();
-  table.append(head, body);
-  tableWrap.append(table);
-  section.append(tableWrap, detail);
+    questionDetails.append(columns);
+    questionList.append(questionDetails);
+  }
+  section.append(questionList);
   return section;
 }
 
@@ -1943,7 +1926,9 @@ async function renderAnswers(caseId) {
     } catch (error) {
       if (error.status !== 404) throw error;
     }
+    const hasSnapshot = Boolean(snapshot);
     const importCard = element("section", undefined, "card stack transfer-card answer-import-card");
+    importCard.hidden = hasSnapshot;
     importCard.append(element("h2", "Import câu trả lời từ máy ứng viên"), element("p", "Ứng viên mở file HTML offline, nộp bài và gửi lại file response cho HĐCM.", "muted"));
     const htmlFile = document.createElement("input");
     htmlFile.type = "file";
@@ -1968,8 +1953,17 @@ async function renderAnswers(caseId) {
     }, "primary");
     importCard.append(htmlLabel, htmlImportButton);
 
+    if (hasSnapshot) {
+      const importActions = element("div", undefined, "actions answer-import-actions");
+      const addResultButton = button("Thêm kết quả", () => {
+        importCard.hidden = false;
+        addResultButton.hidden = true;
+      }, "secondary");
+      importActions.append(addResultButton);
+      view.append(importActions);
+    }
     view.append(importCard);
-    if (snapshot) {
+    if (hasSnapshot) {
       view.append(renderSnapshotWorkspace(snapshot));
       view.append(element("div", "Snapshot là immutable; AI sẽ đánh giá đúng snapshot đang hiển thị.", "notice"));
       view.append(link("Tiếp: Đánh giá AI", stepHref(caseId, "ai"), "link-button"));

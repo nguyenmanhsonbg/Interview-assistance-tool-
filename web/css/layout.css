@@ -69,6 +69,17 @@
 .rubric summary { cursor: pointer; padding: 12px 0; color: var(--ui-primary); font-weight: 600; }
 .rubric-list { display: grid; gap: 8px; padding: 0 0 12px; }
 .answer-detail { display: grid; gap: 16px; }
+.answer-import-actions { justify-content: flex-end; }
+.answer-question-list { display: grid; gap: 12px; }
+.answer-question-collapse { gap: 0; overflow: hidden; padding: 0; }
+.answer-question-summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px; cursor: pointer; list-style: none; }
+.answer-question-summary::-webkit-details-marker { display: none; }
+.answer-question-summary::after { flex: none; color: var(--ui-primary); content: "+"; font-size: 22px; line-height: 1; }
+.answer-question-collapse[open] .answer-question-summary::after { content: "−"; }
+.answer-question-title { min-width: 0; }
+.answer-question-title strong { overflow-wrap: anywhere; }
+.answer-question-meta { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.answer-question-collapse > .answer-columns { align-items: start; padding: 0 18px 18px; border-top: 1px solid var(--ui-border); }
 .task-progress { display: grid; gap: 10px; }
 .task-progress-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-weight: 600; }
 .task-progress-status { color: var(--ui-muted); font-size: 13px; font-weight: 400; }

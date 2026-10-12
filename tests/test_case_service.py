@@ -90,6 +90,52 @@ class InterviewCaseServiceTests(MigratedDatabaseFixture, unittest.TestCase):
 
         self.assertEqual(task_id, service.get_case(case["id"])["activeTaskId"])
 
+    def test_case_projection_exposes_completed_question_task_during_materialization(self):
+        import uuid
+
+        from app.repositories.ai_tasks import AITaskRepository
+        from app.services.case_service import CaseService
+
+        service = CaseService(self.database)
+        job_id, candidate_id = self.create_references(service)
+        case = service.create_case(candidate_id, job_id)
+        task_id = str(uuid.uuid4())
+        with self.database.transaction() as connection:
+            AITaskRepository(self.database).insert(
+                connection,
+                task_id=task_id,
+                case_id=case["id"],
+                assessment_attempt_id=None,
+                assessment_snapshot_id=None,
+                task_type="GENERATE_QUESTIONS",
+                idempotency_key="completed-materialization-key",
+                input_fingerprint="f" * 64,
+                input_manifest={"caseId": case["id"]},
+                provider="GEMINI",
+                model="gemini-2.5-flash",
+                prompt_key="question_generation",
+                prompt_version="v1",
+                schema_version="v1",
+                max_retry=1,
+            )
+            connection.execute(
+                "UPDATE interview_cases SET status = 'QUESTIONS_GENERATING' WHERE id = ?",
+                (case["id"],),
+            )
+            connection.execute(
+                "UPDATE ai_tasks SET status = 'COMPLETED', error_code = NULL WHERE id = ?",
+                (task_id,),
+            )
+
+        self.assertEqual(task_id, service.get_case(case["id"])["activeTaskId"])
+
+        with self.database.connection() as connection:
+            connection.execute(
+                "UPDATE interview_cases SET status = 'QUESTIONS_GENERATED' WHERE id = ?",
+                (case["id"],),
+            )
+        self.assertIsNone(service.get_case(case["id"])["activeTaskId"])
+
 
 if __name__ == "__main__":
     unittest.main()

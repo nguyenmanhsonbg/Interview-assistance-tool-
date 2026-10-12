@@ -65,7 +65,15 @@ class InterviewCaseRepository(RepositoryBase):
                       j.target_level_confidence,
                       (SELECT t.id FROM ai_tasks t
                        WHERE t.interview_case_id = ic.id
-                         AND t.status IN ('PENDING', 'PENDING_RETRY', 'RUNNING')
+                         AND (
+                             t.status IN ('PENDING', 'PENDING_RETRY', 'RUNNING')
+                             OR (
+                                 t.status = 'COMPLETED'
+                                 AND t.error_code IS NULL
+                                 AND t.task_type = 'GENERATE_QUESTIONS'
+                                 AND ic.status = 'QUESTIONS_GENERATING'
+                             )
+                         )
                        ORDER BY t.created_at DESC, t.id DESC LIMIT 1) AS active_task_id
                FROM interview_cases ic
                JOIN candidates c ON c.id = ic.candidate_id
@@ -90,7 +98,15 @@ class InterviewCaseRepository(RepositoryBase):
                         j.target_level_confidence,
                         (SELECT t.id FROM ai_tasks t
                          WHERE t.interview_case_id = ic.id
-                           AND t.status IN ('PENDING', 'PENDING_RETRY', 'RUNNING')
+                           AND (
+                               t.status IN ('PENDING', 'PENDING_RETRY', 'RUNNING')
+                               OR (
+                                   t.status = 'COMPLETED'
+                                   AND t.error_code IS NULL
+                                   AND t.task_type = 'GENERATE_QUESTIONS'
+                                   AND ic.status = 'QUESTIONS_GENERATING'
+                               )
+                           )
                          ORDER BY t.created_at DESC, t.id DESC LIMIT 1) AS active_task_id
                  FROM interview_cases ic
                  JOIN candidates c ON c.id = ic.candidate_id

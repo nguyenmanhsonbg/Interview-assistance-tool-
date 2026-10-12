@@ -90,6 +90,139 @@ Compress-Archive -Path $bundleRoot -DestinationPath $archive -CompressionLevel O
 $archiveHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
 Set-Content -LiteralPath "$archive.sha256" -Value "$archiveHash  $([System.IO.Path]::GetFileName($archive))" -Encoding ASCII
 
+$exeStage = Join-Path $buildRoot "exe-stage"
+New-Item -ItemType Directory -Path $exeStage | Out-Null
+$portableArchiveName = [System.IO.Path]::GetFileName($archive)
+Copy-Item -LiteralPath $archive -Destination (Join-Path $exeStage $portableArchiveName)
+
+$launcher = @'
+@echo off
+setlocal
+set "CLAWCV_ARCHIVE=%~dp0__PORTABLE_ARCHIVE__"
+set "CLAWCV_RUNTIME=%TEMP%\ClawCV-runtime-%RANDOM%%RANDOM%"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath $env:CLAWCV_ARCHIVE -DestinationPath $env:CLAWCV_RUNTIME -Force"
+if errorlevel 1 (
+    echo ClawCV could not extract its runtime package.
+    pause
+    exit /b 1
+)
+pushd "%CLAWCV_RUNTIME%\ClawCV"
+if errorlevel 1 (
+    echo ClawCV runtime directory was not created.
+    pause
+    exit /b 1
+)
+call start.bat
+set "CLAWCV_EXIT=%ERRORLEVEL%"
+popd
+rmdir /s /q "%CLAWCV_RUNTIME%" >nul 2>&1
+exit /b %CLAWCV_EXIT%
+'@
+$launcher = $launcher.Replace("__PORTABLE_ARCHIVE__", $portableArchiveName)
+Set-Content -LiteralPath (Join-Path $exeStage "run-clawv.cmd") -Value $launcher -Encoding ASCII
+
+$sedPath = Join-Path $buildRoot "ClawCV-package.sed"
+$exeArchive = Join-Path $releaseRoot "ClawCV-0.1.0-win64.exe"
+$stageShortPath = (& cmd.exe /d /c ('for %I in ("{0}") do @echo %~sI' -f $exeStage) | Select-Object -Last 1).Trim()
+$releaseShortPath = (& cmd.exe /d /c ('for %I in ("{0}") do @echo %~sI' -f $releaseRoot) | Select-Object -Last 1).Trim()
+if ([string]::IsNullOrWhiteSpace($stageShortPath)) {
+    throw "Could not resolve a short path for the IExpress staging directory"
+}
+if ([string]::IsNullOrWhiteSpace($releaseShortPath)) {
+    throw "Could not resolve a short path for the release directory"
+}
+$exeTargetShortPath = Join-Path $releaseShortPath "ClawCV-0.1.0-win64.exe"
+$sedContent = @"
+[Version]
+Class=IEXPRESS
+SEDVersion=3
+
+[Options]
+PackagePurpose=InstallApp
+ShowInstallProgramWindow=1
+HideExtractAnimation=0
+UseLongFileName=1
+InsideCompressed=1
+CAB_FixedSize=0
+CAB_ResvCodeSigning=0
+RebootMode=N
+InstallPrompt=%InstallPrompt%
+DisplayLicense=%DisplayLicense%
+FinishMessage=%FinishMessage%
+TargetName=$exeTargetShortPath
+FriendlyName=%FriendlyName%
+AppLaunched=%AppLaunched%
+PostInstallCmd=%PostInstallCmd%
+AdminQuietInstCmd=%AdminQuietInstCmd%
+UserQuietInstCmd=%UserQuietInstCmd%
+SourceFiles=SourceFiles
+
+[Strings]
+InstallPrompt=
+DisplayLicense=
+FinishMessage=
+FriendlyName=ClawCV Phase 2 Supervised Interview
+AppLaunched=cmd.exe /c run-clawv.cmd
+PostInstallCmd=<None>
+AdminQuietInstCmd=
+UserQuietInstCmd=
+FILE0="$portableArchiveName"
+FILE1="run-clawv.cmd"
+
+[SourceFiles]
+SourceFiles0=$stageShortPath\
+
+[SourceFiles0]
+%FILE0%=
+%FILE1%=
+"@
+Set-Content -LiteralPath $sedPath -Value $sedContent -Encoding ASCII
+$sedShortPath = (& cmd.exe /d /c ('for %I in ("{0}") do @echo %~sI' -f $sedPath) | Select-Object -Last 1).Trim()
+if ([string]::IsNullOrWhiteSpace($sedShortPath)) {
+    throw "Could not resolve a short path for the IExpress directive"
+}
+$iexpress = Join-Path $env:SystemRoot "System32\iexpress.exe"
+if (-not (Test-Path -LiteralPath $iexpress -PathType Leaf)) {
+    throw "IExpress was not found at $iexpress"
+}
+$staleExecutable = @($exeArchive, "$exeArchive.sha256")
+foreach ($path in $staleExecutable) {
+    if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+}
+Get-ChildItem -LiteralPath $releaseRoot -Filter "~ClawCV-0.1.0-win64*" -Force -ErrorAction SilentlyContinue |
+    Remove-Item -Force
+$iexpressProcess = Start-Process -FilePath $iexpress -ArgumentList @("/N", $sedShortPath) -Wait -PassThru
+if ($iexpressProcess.ExitCode -ne 0) { throw "IExpress failed to build the executable" }
+
+# IExpress can return after starting makecab.exe. Wait for the output to exist
+# and become stable before hashing it or cleaning up the temporary CAB files.
+$buildDeadline = [DateTime]::UtcNow.AddSeconds(180)
+$lastExecutableLength = -1L
+$stableChecks = 0
+while ($stableChecks -lt 2) {
+    if ([DateTime]::UtcNow -ge $buildDeadline) {
+        throw "IExpress did not create a stable executable within 180 seconds: $exeArchive"
+    }
+    if (Test-Path -LiteralPath $exeArchive -PathType Leaf) {
+        $currentExecutableLength = (Get-Item -LiteralPath $exeArchive).Length
+        if ($currentExecutableLength -gt 0 -and $currentExecutableLength -eq $lastExecutableLength) {
+            $stableChecks++
+        }
+        else {
+            $stableChecks = 0
+            $lastExecutableLength = $currentExecutableLength
+        }
+    }
+    Start-Sleep -Milliseconds 500
+}
+$exeHash = (Get-FileHash -LiteralPath $exeArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+Set-Content -LiteralPath "$exeArchive.sha256" -Value "$exeHash  $([System.IO.Path]::GetFileName($exeArchive))" -Encoding ASCII
+Remove-Item -LiteralPath $sedPath -Force
+Get-ChildItem -LiteralPath $releaseRoot -Filter "~ClawCV-0.1.0-win64*" -Force -ErrorAction SilentlyContinue |
+    Remove-Item -Force
+
 Write-Host "Portable package: $archive"
 Write-Host "SHA-256: $archiveHash"
+Write-Host "Self-extracting executable: $exeArchive"
+Write-Host "SHA-256: $exeHash"
 if ($downloadedRuntime) { Write-Host "Python runtime downloaded from python.org and checksum verified." }

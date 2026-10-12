@@ -4,7 +4,7 @@
 
 | Thuộc tính | Giá trị |
 | --- | --- |
-| Dự án | Interview-assistance / ClawCV — Phase 2 Mini Tool |
+| Dự án | Interview-assistance / VCS — Phase 2 Mini Tool |
 | Phiên bản | 1.0 |
 | Ngày | 2026-10-06 |
 | Loại tài liệu | Specification giao diện và hướng dẫn triển khai cho Codex |
@@ -61,7 +61,7 @@ Quy tắc UI bắt buộc:
 - Render `N = questions.length`, không hardcode 8 hoặc 9 ở tiêu đề, progress, counter hay layout.
 - Render nhóm theo `questionCategory` chỉ khi backend thực sự trả trường này. Không tự gán nhóm theo thứ tự câu hoặc suy đoán từ nội dung.
 - Nếu không có category, dùng danh sách phẳng đánh số; bỏ dòng tỷ lệ 3/4/2.
-- `nextStepObjective`, nếu có, được hiển thị riêng với `purpose`; không tự đồng nhất hai trường.
+- `nextStepObjective`, nếu có, vẫn giữ trong payload/contract nhưng không render trong detail hoặc preview; không tự đồng nhất hai trường với `purpose`.
 - Request sinh câu hỏi và thao tác export/import tuân theo policy được backend hỗ trợ và contract đã áp dụng. Không tự sửa parser Excel, prompt hoặc migration để hợp thức hóa 9 câu.
 - Nếu backend sinh 9 câu nhưng Excel contract vẫn giới hạn 8, giữ dữ liệu để review, hiển thị lỗi tương thích và chặn thao tác không hợp lệ. Không cắt câu, đổi ID, thêm cột Excel hoặc giả báo xuất thành công.
 - Codex ghi rõ kết quả kiểm tra C-01. Có thể hoàn thành shell, component và các luồng hợp lệ độc lập; không cần dừng toàn bộ công việc UI.
@@ -168,7 +168,7 @@ Không chỉ dùng màu để phân biệt trạng thái. Mỗi badge có text, 
 
 ### 6.1. Desktop shell
 
-- Sidebar rộng 200 px, chứa brand `ClawCV / Interview Assistant`.
+- Sidebar rộng 200 px, chứa brand `VCS / Interview Asistant`.
 - Navigation chính: “Hồ sơ phỏng vấn”, “Cấu hình”, “Sao lưu”.
 - Cuối sidebar: “Không gian HĐCM”, trạng thái session và nút “Khóa phiên”. Không hiển thị account giả.
 - Topbar cao khoảng 56 px: breadcrumb bên trái; trạng thái kết nối an toàn bên phải.
@@ -298,9 +298,23 @@ Replace tài liệu tạo version mới, không sửa snapshot đã dùng. Nếu
 - Master list rộng 260–300 px desktop; panel chi tiết phần còn lại.
 - List item có display order, tiêu đề ngắn/nội dung tóm tắt, trạng thái selected. Nội dung đầy đủ trong detail.
 - Group theo category nếu thực sự có; count được tính từ dữ liệu, không ép cơ cấu 3/4/2.
-- Detail: nội dung câu hỏi, competency, source, type/difficulty, purpose, nextStepObjective nếu có, expected evidence, required và estimated seconds nếu có.
+- Detail: nội dung câu hỏi, competency, type/difficulty, purpose và expected evidence. Các metadata `source`, `nextStepObjective`, `required` và `estimatedSeconds` vẫn giữ trong payload nhưng không render trong detail/preview.
 - Rubric 0–4 nằm trong accordion “Tiêu chí đánh giá”. Không hiển thị JSON raw làm giao diện chính.
-- Source label phản ánh field thực tế; không đổi `AI` thành “JD + CV” nếu backend không có provenance chi tiết.
+- Không tự suy diễn hoặc hiển thị provenance `source` khi màn hình không yêu cầu; payload backend vẫn giữ field gốc.
+
+**Per-question actions:**
+
+- Khi Question Set còn DRAFT/GENERATED, detail của từng câu hiển thị ba thao tác: “Gen theo prompt”, “Tự động gen câu khác” và “Sửa bằng tay”.
+- “Gen theo prompt” nhận prompt untrusted tối đa 2.000 ký tự; “Tự động gen câu khác” dùng mode `SAME_GROUP` và giữ nguyên group/slot metadata.
+- Hai thao tác AI tạo proposal và hiển thị task progress/preview; không tự ghi đè câu hiện tại. HĐCM chọn “Dùng câu này”, “Tạo lại” hoặc “Bỏ qua”.
+- Apply gửi `expectedQuestionSetUpdatedAt` và source fingerprint; proposal stale phải yêu cầu refresh. Khi APPROVED hoặc assessment đã bắt đầu, các mutation bị khóa.
+
+**Question addition by group:**
+
+- Sidebar luôn render ba group `FOUNDATION`, `APPLICATION`, `DEEP_DIVE`; mỗi group có nút “Thêm câu hỏi”.
+- Popup có “Gen theo prompt” và “Tự động gen”. AI tạo proposal trước; HĐCM chọn “Dùng câu hỏi này”, “Tạo lại” hoặc “Bỏ qua”.
+- Apply thêm câu mới ở cuối Question Set, không đổi ID/order câu cũ. Question Set draft/generated được mở rộng từ 9 đến tối đa 30 câu.
+- Candidate HTML là luồng transfer chính và hỗ trợ count mở rộng; Excel fallback không hiển thị trong UI và không mở rộng contract.
 
 **Edit:** dùng PATCH hiện có cho GENERATED/DRAFT nếu được phép. Form edit có Save/Cancel; không autosave mutation theo mỗi phím. Add/delete/reorder chỉ xuất hiện khi backend cho phép và vẫn giữ ID/version rule. Khi set khóa, hiển thị chỉ đọc và giải thích. Không thêm mandatory approval/check-in vào flow Excel; export GENERATED hoặc APPROVED theo contract hiện tại.
 
@@ -313,7 +327,7 @@ Replace tài liệu tạo version mới, không sửa snapshot đã dùng. Nếu
 - Copy hướng dẫn: “Gửi file HTML cho ứng viên làm bài offline. Sau khi nộp, nhận lại file response HTML để nhập vào hệ thống.”
 - Sau export thành công: chuyển tới bước Câu trả lời để import response HTML.
 
-Excel export/import chỉ còn là CTA fallback được gắn nhãn rõ ở bước Bộ câu hỏi; không phải luồng chính của màn hình Câu trả lời.
+Excel export/import vẫn được backend hỗ trợ cho legacy/manual recovery, nhưng không còn hiển thị CTA trong UI; luồng ứng viên chính dùng candidate HTML.
 
 ### S-06. Câu trả lời — `/cases/:caseId/answers`
 
@@ -437,6 +451,8 @@ Tên refined status dưới đây xuất phát từ Excel implementation plan. M
 | List/import documents | GET/POST `/api/v1/interview-cases/{caseId}/documents` | Manual text hoặc metadata/base64 theo document contract |
 | Confirm document | POST `/api/v1/interview-cases/{caseId}/documents/{documentId}/confirm` | confirmed + textSha256 |
 | Generate/read/edit set | POST/GET/PATCH `/api/v1/interview-cases/{caseId}/question-set` | Generate trả 202/taskId; read/edit trả JSON |
+| Generate/read question variant | POST/GET `/api/v1/interview-cases/{caseId}/question-set/questions/{questionId}/variants` | Proposal trả 202/taskId rồi đọc status/content |
+| Apply/discard question variant | POST `/.../variants/{variantId}/apply` hoặc `/discard` | Chỉ draft; apply có stale fingerprint check |
 | Export workbook | POST `/api/v1/interview-cases/{caseId}/question-set/export` | Binary xlsx response |
 | Import workbook | POST `/api/v1/interview-cases/{caseId}/assessment-snapshots/import` | Binary xlsx request; JSON snapshot response |
 | Export candidate package | POST `/api/v1/interview-cases/{caseId}/candidate-package/export` | No body; binary `candidate-html.v1` response |

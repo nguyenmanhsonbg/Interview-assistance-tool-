@@ -3,6 +3,16 @@ from pathlib import Path
 
 
 class FrontendContractTests(unittest.TestCase):
+    def test_branding_uses_vcs_interview_asistant_copy(self):
+        root = Path(__file__).resolve().parents[1] / "web"
+        index = (root / "index.html").read_text(encoding="utf-8")
+        scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
+
+        self.assertIn('link("VCS", "#/cases", "brand")', scripts)
+        self.assertIn('element("span", "Interview Asistant", "brand-subtitle")', scripts)
+        self.assertIn('element("span", "VCS", "brand-name")', scripts)
+        self.assertIn("<title>VCS — Interview Asistant</title>", index)
+
     def test_frontend_avoids_unsafe_rendering_and_contains_refined_workflow(self):
         root = Path(__file__).resolve().parents[1] / "web"
         scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
@@ -61,6 +71,30 @@ class FrontendContractTests(unittest.TestCase):
         self.assertNotIn("Chưa có assessment snapshot.", scripts)
         self.assertIn("width: min(100%, 640px)", styles)
         self.assertIn("margin-inline: auto", styles)
+
+    def test_answers_screen_uses_versioned_import_toggle_and_collapsible_questions(self):
+        root = Path(__file__).resolve().parents[1] / "web"
+        styles = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.css"))
+        scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
+        answers_start = scripts.index("async function renderAnswers")
+        answers_end = scripts.index("function renderListSection")
+        answers_renderer = scripts[answers_start:answers_end]
+        workspace_start = scripts.index("function renderSnapshotWorkspace")
+        workspace_renderer = scripts[workspace_start:answers_start]
+
+        self.assertIn("const hasSnapshot = Boolean(snapshot);", answers_renderer)
+        self.assertIn("importCard.hidden = hasSnapshot;", answers_renderer)
+        self.assertIn('button("Thêm kết quả"', answers_renderer)
+        self.assertIn('document.createElement("details")', workspace_renderer)
+        self.assertIn("questionDetails.className = \"card answer-question-collapse\"", workspace_renderer)
+        self.assertIn("questionDetails.open = index === 0", workspace_renderer)
+        for marker in (
+            "answer-import-actions",
+            "answer-question-list",
+            "answer-question-summary",
+            "answer-question-meta",
+        ):
+            self.assertIn(marker, styles + scripts)
 
     def test_no_third_party_runtime_import_manifest_exists(self):
         root = Path(__file__).resolve().parents[1]
@@ -132,6 +166,15 @@ class FrontendContractTests(unittest.TestCase):
         self.assertNotIn("textActions", scripts)
         self.assertNotIn("Rubric chấm điểm", scripts)
         self.assertNotIn("function manualQuestions", scripts)
+
+    def test_cv_document_card_uses_short_title_and_import_label(self):
+        root = Path(__file__).resolve().parents[1] / "web"
+        scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
+
+        self.assertIn('const title = type === "JD" ? "Job Description" : "CV";', scripts)
+        self.assertIn('const importPdf = button("Import file CV PDF"', scripts)
+        self.assertNotIn('const title = type === "JD" ? "Job Description" : "Curriculum Vitae";', scripts)
+        self.assertNotIn('button("Đọc và import CV PDF"', scripts)
 
     def test_question_generation_task_has_accessible_indeterminate_progress(self):
         root = Path(__file__).resolve().parents[1] / "web"
@@ -362,6 +405,23 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn('rubric.classList.add("question-addition-rubric")', scripts)
         self.assertIn("rubric.open = false", scripts)
 
+    def test_read_only_question_previews_hide_next_step_objective_while_manual_payload_keeps_it(self):
+        root = Path(__file__).resolve().parents[1] / "web"
+        scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
+
+        addition_start = scripts.index("function renderQuestionAdditionFields")
+        addition_end = scripts.index("function openQuestionAdditionDetails")
+        variant_start = scripts.index("function renderVariantFields")
+        variant_end = scripts.index("function renderQuestionVariantPreview")
+        manual_start = scripts.index("function createManualQuestionModel")
+        manual_end = scripts.index("async function renderQuestions")
+
+        self.assertNotIn("question?.nextStepObjective", scripts[addition_start:addition_end])
+        self.assertNotIn("variant?.nextStepObjective", scripts[variant_start:variant_end])
+        manual_renderer = scripts[manual_start:manual_end]
+        self.assertIn("const objective = field(", manual_renderer)
+        self.assertIn('[objective, "nextStepObjective"]', manual_renderer)
+
     def test_questions_workspace_restores_selected_question_after_refresh(self):
         root = Path(__file__).resolve().parents[1] / "web"
         scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
@@ -369,6 +429,24 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("const rememberedSelection = getState().selectedQuestion;", scripts)
         self.assertIn("setState({ selectedQuestion: { caseId, questionId: selectedId } });", scripts)
         self.assertIn("let restoreFocusId = selectedId;", scripts)
+
+    def test_question_detail_hides_unneeded_metadata_and_localizes_question_type(self):
+        root = Path(__file__).resolve().parents[1] / "web"
+        scripts = "\n".join(path.read_text(encoding="utf-8") for path in root.rglob("*.js"))
+        detail_start = scripts.index("function renderQuestionDetail")
+        detail_end = scripts.index("function renderQuestionWorkspace")
+        detail_renderer = scripts[detail_start:detail_end]
+
+        for hidden_field in (
+            "question.sourceKind",
+            "question.nextStepObjective",
+            "question.isRequired",
+            "question.estimatedSeconds",
+        ):
+            self.assertNotIn(hidden_field, detail_renderer)
+        self.assertIn("questionTypeLabel(question.questionType)", detail_renderer)
+        self.assertIn("LONG_TEXT: \"Tự luận\"", scripts)
+        self.assertIn("MULTI_CHOICE: \"Chọn đáp án\"", scripts)
 
     def test_two_pass_evaluation_progress_preserves_previous_result_provenance(self):
         root = Path(__file__).resolve().parents[1] / "web"
